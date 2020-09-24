@@ -49,10 +49,17 @@ class MailboxCoordinator : DefaultCoordinator {
         self.navigation = nav
     }
     
-    init(vc: MailboxViewController, vm: MailboxViewModel, services: ServiceFactory) {
+    init(nav: UINavigationController?, vc: MailboxViewController, vm: MailboxViewModel, services: ServiceFactory) {
         self.viewModel = vm
         self.viewController = vc
         self.services = services
+        self.navigation = nav
+    }
+    
+    init(vc: MailboxViewController, vm: MailboxViewModel, services: ServiceFactory) {
+        self.viewModel = vm
+        self.services = services
+        self.viewController = vc
     }
     
     init(rvc: SWRevealViewController?, nav: UINavigationController?, vc: MailboxViewController, vm: MailboxViewModel, services: ServiceFactory) {
@@ -68,6 +75,7 @@ class MailboxCoordinator : DefaultCoordinator {
     enum Destination : String {
         case composer          = "toCompose"
         case composeShow       = "toComposeShow"
+        case composeMailto     = "toComposeMailto"
         case search            = "toSearchViewController"
         case details           = "toMessageDetailViewController"
         case detailsFromNotify = "toMessageDetailViewControllerFromNotification"
@@ -77,11 +85,13 @@ class MailboxCoordinator : DefaultCoordinator {
         case humanCheck        = "toHumanCheckView"
         case folder            = "toMoveToFolderSegue"
         case labels            = "toApplyLabelsSegue"
+        case troubleShoot      = "toTroubleShootSegue"
         
         init?(rawValue: String) {
             switch rawValue {
             case "toCompose": self = .composer
             case "toComposeShow", String(describing: ComposeContainerViewController.self): self = .composeShow
+            case "toComposeMailto": self = .composeMailto
             case "toSearchViewController", String(describing: SearchViewController.self): self = .search
             case "toMessageDetailViewController", String(describing: MessageContainerViewController.self): self = .details
             case "toMessageDetailViewControllerFromNotification": self = .detailsFromNotify
@@ -91,6 +101,7 @@ class MailboxCoordinator : DefaultCoordinator {
             case "toHumanCheckView": self = .humanCheck
             case "toMoveToFolderSegue": self = .folder
             case "toApplyLabelsSegue": self = .labels
+            case "toTroubleShootSegue": self = .troubleShoot
             default: return nil
             }
         }
@@ -106,7 +117,7 @@ class MailboxCoordinator : DefaultCoordinator {
         }
         self.navBeforeStart = nil
     }
-    
+
     func navigate(from source: UIViewController, to destination: UIViewController, with identifier: String?, and sender: AnyObject?) -> Bool {
         guard let segueID = identifier, let dest = Destination(rawValue: segueID) else {
             return false //
@@ -124,7 +135,8 @@ class MailboxCoordinator : DefaultCoordinator {
                 let message = self.viewModel.item(index: indexPathForSelectedRow) else {
                     return false
             }
-            next.set(viewModel: .init(message: message))
+            
+            next.set(viewModel: .init(message: message, msgService: self.viewModel.messageService, user: self.viewModel.user))
             next.set(coordinator: .init(controller: next))
         case .detailsFromNotify:
             guard let next = destination as? MessageContainerViewController else {
@@ -135,7 +147,8 @@ class MailboxCoordinator : DefaultCoordinator {
             guard let message = self.viewModel.notificationMessage else {
                 return false
             }
-            next.set(viewModel: .init(message: message))
+            let user = self.viewModel.user
+            next.set(viewModel: .init(message: message, msgService: user.messageService, user: user))
             next.set(coordinator: .init(controller: next))
             self.viewModel.resetNotificationMessage()
             
@@ -145,11 +158,12 @@ class MailboxCoordinator : DefaultCoordinator {
             {
                 return false
             }
-            let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft)
+            let user = self.viewModel.user
+            let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft, msgService: user.messageService, user: user)
             next.set(viewModel: ComposeContainerViewModel(editorViewModel: viewModel))
             next.set(coordinator: ComposeContainerViewCoordinator(controller: next))
             
-        case .composeShow:
+        case .composeShow, .composeMailto:
             self.viewController?.cancelButtonTapped()
             
             guard let nav = destination as? UINavigationController,
@@ -158,8 +172,9 @@ class MailboxCoordinator : DefaultCoordinator {
             {
                 return false
             }
-            
-            let viewModel = ContainableComposeViewModel(msg: message, action: .openDraft)
+
+            let user = self.viewModel.user
+            let viewModel = ContainableComposeViewModel(msg: message, action: .openDraft, msgService: user.messageService, user: user)
             next.set(viewModel: ComposeContainerViewModel(editorViewModel: viewModel))
             next.set(coordinator: ComposeContainerViewCoordinator(controller: next))
             
@@ -185,7 +200,8 @@ class MailboxCoordinator : DefaultCoordinator {
                 return false
             }
 
-            next.viewModel = FolderApplyViewModelImpl(msg: messages)
+            let user = self.viewModel.user
+            next.viewModel = FolderApplyViewModelImpl(msg: messages, folderService: user.labelService, messageService: user.messageService, apiService: user.apiService)
             next.delegate = self.viewController
         case .labels:
             guard let next = destination as? LablesViewController else {
@@ -194,8 +210,19 @@ class MailboxCoordinator : DefaultCoordinator {
             guard let messages = sender as? [Message] else {
                 return false
             }
-            next.viewModel = LabelApplyViewModelImpl(msg: messages)
+            
+            let user = self.viewModel.user
+            next.viewModel = LabelApplyViewModelImpl(msg: messages, labelService: user.labelService, messageService: user.messageService, apiService: user.apiService)
             next.delegate = self.viewController
+            
+        case .troubleShoot:
+            guard let nav = destination as? UINavigationController else
+            {
+                return false
+            }
+            
+            let tsVC = NetworkTroubleShootCoordinator.init(segueNav: nav, vm: NetworkTroubleShootViewModelImpl(), services: services)
+            tsVC.start()
         }
         return true
     }   
@@ -210,19 +237,23 @@ class MailboxCoordinator : DefaultCoordinator {
         switch dest {
         case .details:
             if let messageID = path.value,
-                case let msgService = services.get() as MessageDataService,
+                case let user = self.viewModel.user,
+                case let msgService = user.messageService,
                 let message = msgService.fetchMessages(withIDs: [messageID]).first,
                 let nav = self.navigation
             {
-                    let details = MessageContainerViewCoordinator(nav: nav, viewModel: .init(message: message), services: services)
-                    details.start()
-                    details.follow(deeplink)
+                let details = MessageContainerViewCoordinator(nav: nav, viewModel: .init(message: message, msgService: msgService, user: user), services: services)
+                details.start()
+                details.follow(deeplink)
             }
         case .composeShow where path.value != nil:
             if let messageID = path.value,
                 let nav = self.navigation,
-                let viewModel = ContainableComposeViewModel(msgId: messageID, action: .openDraft)
+                case let user = self.viewModel.user,
+                case let msgService = user.messageService,
+                let message = msgService.fetchMessages(withIDs: [messageID]).first
             {
+                let viewModel = ContainableComposeViewModel(msg: message, action: .openDraft, msgService: msgService, user: user)
                 let composer = ComposeContainerViewCoordinator.init(nav: nav, viewModel: ComposeContainerViewModel(editorViewModel: viewModel), services: services)
                 composer.start()
                 composer.follow(deeplink)
@@ -230,7 +261,75 @@ class MailboxCoordinator : DefaultCoordinator {
             
         case .composeShow where path.value == nil:
             if let nav = self.navigation {
-                let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft)
+                let user = self.viewModel.user
+                let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft, msgService: user.messageService, user: user)
+                let composer = ComposeContainerViewCoordinator.init(nav: nav, viewModel: ComposeContainerViewModel(editorViewModel: viewModel), services: services)
+                composer.start()
+                composer.follow(deeplink)
+            }
+        case .composeMailto where path.value != nil:
+            if let nav = self.navigation, let value = path.value {
+                let user = self.viewModel.user
+                let mailToURL = URL(string: value)!
+                let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft, msgService: user.messageService, user: user)
+                if let mailTo : NSURL = mailToURL as? NSURL, mailTo.scheme == "mailto", let resSpecifier = mailTo.resourceSpecifier {
+                    let rawURLparts = resSpecifier.components(separatedBy: "?")
+                    if (rawURLparts.count > 2) {
+                        
+                    } else {
+                        let defaultRecipient = rawURLparts[0]
+                        if defaultRecipient.count > 0 { //default to
+                            if defaultRecipient.isValidEmail() {
+                                viewModel.addToContacts(ContactVO(name: defaultRecipient, email: defaultRecipient))
+                            }
+                            PMLog.D("to: \(defaultRecipient)")
+                        }
+                        
+                        if (rawURLparts.count == 2) {
+                            let queryString = rawURLparts[1]
+                            let params = queryString.components(separatedBy: "&")
+                            for param in params {
+                                let keyValue = param.components(separatedBy: "=")
+                                if (keyValue.count != 2) {
+                                    continue
+                                }
+                                let key = keyValue[0].lowercased()
+                                var value = keyValue[1]
+                                value = value.removingPercentEncoding ?? ""
+                                if key == "subject" {
+                                    PMLog.D("subject: \(value)")
+                                    viewModel.setSubject(value)
+                                }
+                                
+                                if key == "body" {
+                                    PMLog.D("body: \(value)")
+                                    viewModel.setBody(value)
+                                }
+                                
+                                if key == "to" {
+                                    PMLog.D("to: \(value)")
+                                    if value.isValidEmail() {
+                                        viewModel.addToContacts(ContactVO(name: value, email: value))
+                                    }
+                                }
+                                
+                                if key == "cc" {
+                                    PMLog.D("cc: \(value)")
+                                    if value.isValidEmail() {
+                                        viewModel.addCcContacts(ContactVO(name: value, email: value))
+                                    }
+                                }
+                                
+                                if key == "bcc" {
+                                    PMLog.D("bcc: \(value)")
+                                    if value.isValidEmail() {
+                                        viewModel.addBccContacts(ContactVO(name: value, email: value))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 let composer = ComposeContainerViewCoordinator.init(nav: nav, viewModel: ComposeContainerViewModel(editorViewModel: viewModel), services: services)
                 composer.start()
                 composer.follow(deeplink)

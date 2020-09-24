@@ -25,26 +25,13 @@ import Foundation
 import Contacts
 
 class AddressBookService: Service {
-    enum RuntimeError : String, Error, CustomErrorVar {
-        case cant_get_contacts = "Unable to get contacts"
-        var code: Int {
-            get {
-                return -1003000
-            }
-        }
+    enum RuntimeError : Error {
+        case cant_get_contacts
         var desc: String {
             get {
                 switch self {
                 case .cant_get_contacts:
                     return LocalString._unable_to_get_contacts
-                }
-            }
-        }
-        var reason: String {
-            get {
-                switch self {
-                case .cant_get_contacts:
-                    return NSLocalizedString("get contacts() failed, peopleOrderedByUsersPreference return null!!", comment: "contacts api error when fetch")
                 }
             }
         }
@@ -107,28 +94,25 @@ class AddressBookService: Service {
         var contactVOs: [ContactVO] = []
         
         guard case let contacts = self.getAllContacts(), !contacts.isEmpty else {
-            Analytics.shared.recordError(RuntimeError.cant_get_contacts.error)
+            //TODO:: refactor this later
+            //Analytics.shared.recordError(RuntimeError.cant_get_contacts.error)
             return []
         }
         
         for contact in contacts {
             var name: String = [contact.givenName, contact.middleName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
-            
             let emails = contact.emailAddresses
             for email in emails {
                 let emailAsString = email.value as String
-                DispatchQueue.main.sync {
-                    if (emailAsString.isValidEmail()) {
-                        let email = emailAsString
-                        if (name.isEmpty) {
-                            name = email
-                        }
-                        contactVOs.append(ContactVO(name: name, email: email, isProtonMailContact: false))
+                if (emailAsString.isValidEmail()) {
+                    let email = emailAsString
+                    if (name.isEmpty) {
+                        name = email
                     }
+                    contactVOs.append(ContactVO(name: name, email: email, isProtonMailContact: false))
                 }
             }
         }
-
         return contactVOs
     }
 }

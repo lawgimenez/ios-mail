@@ -106,28 +106,7 @@ class ComposeViewModel: NSObject {
     var bodyChanged : Bool = false;
     
     func isValidNumberOfRecipients() -> Bool {
-        
         return true
-//        let allRecipients = [toSelectedContacts,
-//                             ccSelectedContacts,
-//                             bccSelectedContacts]
-//        
-//        var emailList = Set<String>() // distinctive email addresses
-//        for recipients in allRecipients {
-//            for recipient in recipients {
-//                switch recipient.modelType {
-//                case .contact:
-//                    emailList.insert((recipient as! ContactVO).email)
-//                case .contactGroup:
-//                    let contactGroup = recipient as! ContactGroupVO
-//                    for email in contactGroup.getSelectedEmailAddresses() {
-//                        emailList.insert(email)
-//                    }
-//                }
-//            }
-//        }
-//        
-//        return emailList.count <= Constants.App.MaxNumberOfRecipients
     }
     
     func getSubject() -> String {
@@ -162,8 +141,12 @@ class ComposeViewModel: NSObject {
         
     }
     
+    func getUser() -> UserManager {
+          fatalError("This method must be overridden")
+    }
+    
     ///
-    func sendMessage(hasExtenal: Bool) {
+    func sendMessage() {
         NSException(name:NSExceptionName(rawValue: "name"), reason:"reason", userInfo:nil).raise()
     }
     

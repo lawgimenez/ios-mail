@@ -23,7 +23,7 @@
 
 import UIKit
 import MBProgressHUD
-import Keymaker
+import PMKeymaker
 
 class SettingsTableViewController: ProtonMailTableViewController, ViewModelProtocol, CoordinatedNew {
     internal var viewModel : SettingsViewModel!
@@ -48,6 +48,7 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                                                             .multiDomain,
                                                             .swipeAction,
                                                             .language,
+                                                            .network,
                                                             .storage,
                                                             .version] //.Debug,
     
@@ -67,17 +68,21 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
     
     var setting_labels_items : [SLabelsItems]            = [.labelFolderManager]
     
+    
+    var setting_network_items : [SNetworkItems]            = [.doh]
+    
+    
     var setting_languages : [ELanguage]                  = ELanguage.allItems()
     
     var protection_auto_logout : [Int]                   = [-1, 0, 1, 2, 5,
                                                             10, 15, 30, 60]
     
     var multi_domains: [Address]!
-    var userInfo: UserInfo? = sharedUserDataService.userInfo {
-        didSet {
-            if oldValue != userInfo {
-                self.tableView.reloadData()
-            }
+    //TODO:: move to view model
+    var userManager : UserManager {
+        get {
+            let users : UsersManager = sharedServices.get()
+            return users.firstUser!
         }
     }
     
@@ -90,6 +95,8 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
     let HeaderCell                    = "header_cell"
     let SingleTextCell                = "single_text_cell"
     let SwitchCell                    = "switch_table_view_cell"
+    let SwitchTwolineCell             = "switch_two_line_cell"
+    
     
     //
     let CellHeight : CGFloat = 30.0
@@ -101,9 +108,14 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
     //
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.restorationClass = SettingsTableViewController.self
         self.updateTitle()
         self.tableView.register(UITableViewHeaderFooterView.self, forHeaderFooterViewReuseIdentifier: HeaderCell)
+        
+        self.tableView.estimatedSectionHeaderHeight = CellHeight
+        self.tableView.sectionHeaderHeight = UITableView.automaticDimension
+        
+        self.tableView.estimatedRowHeight = CellHeight
+        self.tableView.rowHeight = UITableView.automaticDimension
     }
     
     private func updateTitle() {
@@ -117,7 +129,7 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         self.updateProtectionItems()
-        
+//        userManager.userInfo.passwor
         if sharedUserDataService.passwordMode == 1 {
             setting_general_items = [.notifyEmail, .singlePWD, .autoLoadImage, .linkOpeningMode, .browser, .metadataStripping, .cleanCache]
         } else {
@@ -126,9 +138,8 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
         if #available(iOS 10.0, *), Constants.Feature.snoozeOn {
             setting_general_items.append(.notificationsSnooze)
         }
-   
-        multi_domains = sharedUserDataService.addresses
-        self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
+        
+        multi_domains = self.userManager.addresses
         navigationController?.setNavigationBarHidden(false, animated: true)
     }
     
@@ -182,6 +193,8 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                 return 1
             case .labels:
                 return setting_labels_items.count
+            case .network:
+                return setting_network_items.count
             }
         }
         return 0
@@ -198,8 +211,8 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                     switch itme {
                     case .notifyEmail:
                         let cell = tableView.dequeueReusableCell(withIdentifier: SettingTwoLinesCell, for: indexPath) as! SettingsCell
-                        cell.configCell(leftText: itme.description,
-                                        rightText: userInfo?.notificationEmail ?? "")
+                        cell.LeftText.text = itme.description
+                        cell.RightText.text = self.userManager.userinfo.notificationEmail //userInfo?.notificationEmail
                         cell.accessoryType = UITableViewCell.AccessoryType.disclosureIndicator
                         cellout = cell
                     case .loginPWD, .mbp, .singlePWD:
@@ -222,27 +235,27 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                         let cell = tableView.dequeueReusableCell(withIdentifier: SwitchCell, for: indexPath) as! SwitchTableViewCell
                         cell.accessoryType = UITableViewCell.AccessoryType.none
                         cell.selectionStyle = UITableViewCell.SelectionStyle.none
-                        if let userInfo = userInfo {
-                            cell.configCell(itme.description, bottomLine: "", status: userInfo.autoShowRemote, complete: { (cell, newStatus,  feedback: @escaping ActionStatus) -> Void in
-                                if let indexp = tableView.indexPath(for: cell!), indexPath == indexp {
-                                    let view = UIApplication.shared.keyWindow ?? UIView()
-                                    MBProgressHUD.showAdded(to: view, animated: true)
-                                    sharedUserDataService.updateAutoLoadImage(remote: newStatus, completion: { (_, _, error) in
-                                        MBProgressHUD.hide(for: view, animated: true)
-                                        if let error = error {
-                                            feedback(false)
-                                            let alertController = error.alertController()
-                                            alertController.addOKAction()
-                                            self.present(alertController, animated: true, completion: nil)
-                                        } else {
-                                            feedback(true)
-                                        }
-                                    })
-                                } else {
-                                    feedback(false)
-                                }
-                            })
-                        }
+//                        if let userInfo = userInfo {
+//                            cell.configCell(itme.description, bottomLine: "", status: userInfo.autoShowRemote, complete: { (cell, newStatus,  feedback: @escaping SwitchTableViewCell.ActionStatus) -> Void in
+//                                if let indexp = tableView.indexPath(for: cell!), indexPath == indexp {
+//                                    let view = UIApplication.shared.keyWindow ?? UIView()
+//                                    MBProgressHUD.showAdded(to: view, animated: true)
+//                                    sharedUserDataService.updateAutoLoadImage(remote: newStatus, completion: { (_, _, error) in
+//                                        MBProgressHUD.hide(for: view, animated: true)
+//                                        if let error = error {
+//                                            feedback(false)
+//                                            let alertController = error.alertController()
+//                                            alertController.addOKAction()
+//                                            self.present(alertController, animated: true, completion: nil)
+//                                        } else {
+//                                            feedback(true)
+//                                        }
+//                                    })
+//                                } else {
+//                                    feedback(false)
+//                                }
+//                            })
+//                        }
                         cellout = cell
                     case .browser:
                         let cell = tableView.dequeueReusableCell(withIdentifier: SettingDomainsCell, for: indexPath) as! DomainsTableViewCell
@@ -256,22 +269,21 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                         let cell = tableView.dequeueReusableCell(withIdentifier: SwitchCell, for: indexPath) as! SwitchTableViewCell
                         cell.accessoryType = UITableViewCell.AccessoryType.none
                         cell.selectionStyle = UITableViewCell.SelectionStyle.none
-                        if let userInfo = userInfo {
-                            cell.configCell(itme.description, bottomLine: "", status: userInfo.linkConfirmation == .confirmationAlert) { cell, newStatus, feedback in
-                                let view = UIApplication.shared.keyWindow ?? UIView()
-                                MBProgressHUD.showAdded(to: view, animated: true)
-                                sharedUserDataService.updateLinkConfirmation(newStatus ? .confirmationAlert : .openAtWill) { userInfo, _, error in
-                                    MBProgressHUD.hide(for: view, animated: true)
-                                    if let error = error {
-                                        feedback(false)
-                                        let alertController = error.alertController()
-                                        alertController.addOKAction()
-                                        self.present(alertController, animated: true, completion: nil)
-                                    } else {
-                                        feedback(true)
-                                    }
-                                }
-                            }
+                        let userInfo = self.userManager.userinfo
+                        cell.configCell(itme.description, bottomLine: "", status: userInfo.linkConfirmation == .confirmationAlert) { cell, newStatus, feedback in
+                            let view = UIApplication.shared.keyWindow ?? UIView()
+                            MBProgressHUD.showAdded(to: view, animated: true)
+//                            sharedUserDataService.updateLinkConfirmation(newStatus ? .confirmationAlert : .openAtWill) { userInfo, _, error in
+//                                MBProgressHUD.hide(for: view, animated: true)
+//                                if let error = error {
+//                                    feedback(false)
+//                                    let alertController = error.alertController()
+//                                    alertController.addOKAction()
+//                                    self.present(alertController, animated: true, completion: nil)
+//                                } else {
+//                                    feedback(true)
+//                                }
+//                            }
                         }
                         cellout = cell
                     case .metadataStripping:
@@ -401,12 +413,12 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                         cellout = cell
                     case .displayName:
                         let cell = tableView.dequeueReusableCell(withIdentifier: SettingTwoLinesCell, for: indexPath) as! SettingsCell
-                        if let addr = userInfo?.userAddresses.defaultAddress() {
-                            cell.configCell(leftText: address_item.description,
-                                            rightText: addr.display_name)
+                        cell.LeftText.text = address_item.description
+                        let userInfo = self.userManager.userinfo
+                        if let addr = userInfo.userAddresses.defaultAddress() {
+                            cell.RightText.text = addr.display_name
                         } else {
-                            cell.configCell(leftText: address_item.description,
-                                            rightText: userInfo?.displayName.decodeHtml() ?? "")
+                            cell.RightText.text = userInfo.displayName.decodeHtml()
                         }
                         cell.accessoryType = UITableViewCell.AccessoryType.disclosureIndicator
                         cellout = cell
@@ -426,16 +438,18 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                 if indexPath.row < setting_swipe_action_items.count {
                     let actionItem = setting_swipe_action_items[indexPath.row]
                     let cell = tableView.dequeueReusableCell(withIdentifier: SettingDomainsCell, for: indexPath) as! DomainsTableViewCell
-                    let action = actionItem == .left ? userInfo?.swipeLeftAction : userInfo?.swipeRightAction
-                    cell.configCell(domainText: actionItem.description,
-                                    defaultMark: action?.description ?? "")
+                    let userInfo = self.userManager.userinfo
+                    let action = actionItem == .left ? userInfo.swipeLeftAction : userInfo.swipeRightAction
+                    cell.domainText.text = actionItem.description
+                    cell.defaultMark.text = action?.description
                     cell.accessoryType = UITableViewCell.AccessoryType.disclosureIndicator
                     cellout = cell
                 }
             case .storage:
                 let cell = tableView.dequeueReusableCell(withIdentifier: SettingStorageCell, for: indexPath) as! StorageViewCell
-                let usedSpace = userInfo?.usedSpace ?? 0
-                let maxSpace = userInfo?.maxSpace ?? 0
+                let userInfo = self.userManager.userinfo
+                let usedSpace = userInfo.usedSpace
+                let maxSpace = userInfo.maxSpace
                 cell.setValue(usedSpace, maxSpace: maxSpace)
                 cell.selectionStyle = UITableViewCell.SelectionStyle.none
                 cellout = cell
@@ -458,6 +472,44 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                 cell.accessoryType = UITableViewCell.AccessoryType.disclosureIndicator
                 cellout = cell
                 
+            case .network:
+                let netItem = setting_network_items[indexPath.row]
+                
+                if netItem == .doh {
+                    let cell = tableView.dequeueReusableCell(withIdentifier: SwitchTwolineCell, for: indexPath) as! SwitchTwolineCell
+                    cell.accessoryType = UITableViewCell.AccessoryType.none
+                    cell.selectionStyle = UITableViewCell.SelectionStyle.none
+                    let topline = "Allow alternative routing"
+                    let holder = "In case Proton sites are blocked, this setting allows the app to try alternative network routing to reach Proton, which can be useful for bypassing firewalls or network issues. We recommend keeping this setting on for greater reliability. %1$@"
+                    let learnMore = "Learn more"
+                    
+                    let full = String.localizedStringWithFormat(holder, learnMore)
+                    let attributedString = NSMutableAttributedString(string: full,
+                                                                     attributes: [.font : UIFont.preferredFont(forTextStyle: .footnote),
+                                                                                  .foregroundColor : UIColor.darkGray])
+                    if let subrange = full.range(of: learnMore) {
+                        let nsRange = NSRange(subrange, in: full)
+                        attributedString.addAttribute(.link,
+                                                      value: "http://protonmail.com/blog/anti-censorship-alternative-routing",
+                                                      range: nsRange)
+                    }
+                    cell.configCell(topline, bottomLine: attributedString, showSwitcher: true, status: DoHMail.default.status == .on) { (cell, newStatus, feedback) in
+                        if newStatus {
+                            DoHMail.default.status = .on
+                            userCachedStatus.isDohOn = true
+                        } else {
+                            DoHMail.default.status = .off
+                            userCachedStatus.isDohOn = false
+                        }
+                    }
+                    cellout = cell
+                }
+                if netItem == .clear {
+                    let cell = tableView.dequeueReusableCell(withIdentifier: SettingSingalSingleLineCell, for: indexPath) as! GeneralSettingSinglelineCell
+                    cell.configCell(netItem.description)
+                    cell.accessoryType = UITableViewCell.AccessoryType.none
+                    cellout = cell
+                }
             case .version:
                 break
             }
@@ -476,8 +528,19 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
     
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         let header = tableView.dequeueReusableHeaderFooterView(withIdentifier: HeaderCell)
-        header?.textLabel?.font = Fonts.h6.regular
-        header?.textLabel?.textColor = UIColor.ProtonMail.Gray_8E8E8E
+        header?.contentView.subviews.forEach{ $0.removeFromSuperview() }
+        
+        let textLabel = UILabel()
+        
+        if #available(iOS 10, *) {
+            textLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+            textLabel.adjustsFontForContentSizeCategory = true
+        } else {
+            textLabel.font = Fonts.h6.regular
+        }
+        
+        textLabel.textColor = UIColor.ProtonMail.Gray_8E8E8E
+        textLabel.numberOfLines = 0
         
         if(setting_headers[section] == SettingSections.version){
             var appVersion = "Unkonw Version"
@@ -492,19 +555,22 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
             
             let lib_v = PMNLibVersion.getLibVersion()
             libVersion = "| LibVersion: \(lib_v)"
-            header?.textLabel?.text = appVersion + " " + libVersion
+            textLabel.text = appVersion + " " + libVersion
         }
         else
         {
-            header?.textLabel?.text = setting_headers[section].description
+            textLabel.text = setting_headers[section].description
         }
+        
+        header?.contentView.addSubview(textLabel)
+        textLabel.mas_makeConstraints({ (make) in
+            let _ = make?.top.equalTo()(header?.contentView.mas_top)?.with()?.offset()(8)
+            let _ = make?.bottom.equalTo()(header?.contentView.mas_bottom)?.with()?.offset()(-8)
+            let _ = make?.left.equalTo()(header?.contentView.mas_left)?.with()?.offset()(8)
+            let _ = make?.right.equalTo()(header?.contentView.mas_right)?.with()?.offset()(-8)
+        })
         return header
     }
-    
-    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return CellHeight
-    }
-    
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         if setting_headers.count > indexPath.section {
@@ -525,24 +591,28 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                         } else {
                             self.coordinator?.go(to: .loginPwd)
                         }
+                        break
                     case .mbp:
                         self.coordinator?.go(to: .mailboxPwd)
                     case .singlePWD:
                         self.coordinator?.go(to: .singlePwd)
                     case .cleanCache:
-                        if !cleaning {
-                            cleaning = true
-                            let nview = self.navigationController?.view ?? UIView()
-                            let hud : MBProgressHUD = MBProgressHUD.showAdded(to: nview, animated: true)
-                            hud.label.text = LocalString._settings_resetting_cache
-                            hud.removeFromSuperViewOnHide = true
-                            sharedMessageDataService.cleanLocalMessageCache() { task, res, error in
-                                hud.mode = MBProgressHUDMode.text
-                                hud.label.text = LocalString._general_done_button
-                                hud.hide(animated: true, afterDelay: 1)
-                                self.cleaning = false
-                            }
-                        }
+                        "Can't clear cache right now. will be back soon".alertToast()
+//                        if !cleaning {
+//                            cleaning = true
+//                            let nview = self.navigationController?.view ?? UIView()
+//                            let hud : MBProgressHUD = MBProgressHUD.showAdded(to: nview, animated: true)
+//                            hud.label.text = LocalString._settings_resetting_cache
+//                            hud.removeFromSuperViewOnHide = true
+//
+//                            //TODO:: fix me
+//                            sharedMessageDataService.cleanLocalMessageCache() { task, res, error in
+//                                hud.mode = MBProgressHUDMode.text
+//                                hud.label.text = LocalString._general_done_button
+//                                hud.hide(animated: true, afterDelay: 1)
+//                                self.cleaning = false
+//                            }
+//                        }
                     case .notificationsSnooze:
                         self.coordinator?.go(to: .snooze)
                     case .browser:
@@ -572,7 +642,6 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                     let debug_item: SDebugItem = setting_debug_items[indexPath.row]
                     switch debug_item {
                     case .queue:
-//                        self.performSegue(withIdentifier: DebugQueueSegue, sender: self)
                         self.coordinator?.go(to: .debugQueue)
                         break
                     case .errorLogs:
@@ -659,13 +728,13 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                                         }
                                         let view = UIApplication.shared.keyWindow ?? UIView()
                                         MBProgressHUD.showAdded(to: view, animated: true)
-                                        sharedUserDataService.updateUserDomiansOrder(newAddrs,  newOrder:newOrder) { _, _, error in
-                                            MBProgressHUD.hide(for: view, animated: true)
-                                            if error == nil {
-                                                self.multi_domains = newAddrs
-                                            }
-                                            self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
-                                        }
+//                                        sharedUserDataService.updateUserDomiansOrder(newAddrs,  newOrder:newOrder) { _, _, error in
+//                                            MBProgressHUD.hide(for: view, animated: true)
+//                                            if error == nil {
+//                                                self.multi_domains = newAddrs
+//                                            }
+//                                            //self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
+//                                        }
                                     }))
                                 }
                             }
@@ -678,12 +747,9 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                         }
                     case .displayName:
                         self.coordinator?.go(to: .displayName)
-//                        self.performSegue(withIdentifier: DisplayNameSegue, sender: self)
                     case .signature:
-//                        self.performSegue(withIdentifier: SignatureSegue, sender: self)
                         self.coordinator?.go(to: .signature)
                     case .defaultMobilSign:
-//                        self.performSegue(withIdentifier: MobileSignatureSegue, sender: self)
                         self.coordinator?.go(to: .mobileSignature)
                     }
                 }
@@ -692,18 +758,20 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                     let action_item = setting_swipe_action_items[indexPath.row]
                     let alertController = UIAlertController(title: action_item.actionDescription, message: nil, preferredStyle: .actionSheet)
                     alertController.addAction(UIAlertAction(title: LocalString._general_cancel_button, style: .cancel, handler: nil))
-                    
-                    let currentAction = action_item == .left ? userInfo?.swipeLeftAction : userInfo?.swipeRightAction
+                    let userInfo = self.userManager.userInfo
+                    let currentAction = action_item == .left ? userInfo.swipeLeftAction : userInfo.swipeRightAction
                     for swipeAction in setting_swipe_actions {
                         if swipeAction != currentAction {
                             alertController.addAction(UIAlertAction(title: swipeAction.description, style: .default, handler: { (action) -> Void in
                                 let _ = self.navigationController?.popViewController(animated: true)
                                 let view = UIApplication.shared.keyWindow ?? UIView()
                                 MBProgressHUD.showAdded(to: view, animated: true)
-                                sharedUserDataService.updateUserSwipeAction(action_item == .left, action: swipeAction, completion: { (task, response, error) -> Void in
+                                self.userManager.userService.updateUserSwipeAction(auth: self.userManager.auth,
+                                                                                   userInfo: userInfo,
+                                                                                   isLeft: action_item == .left,
+                                                                                   action: swipeAction) { (task, response, error) in
                                     MBProgressHUD.hide(for: view, animated: true)
-                                    self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
-                                })
+                                }
                             }))
                         }
                     }
@@ -713,38 +781,50 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
                     present(alertController, animated: true, completion: nil)
                 }
             case .labels:
-//                self.performSegue(withIdentifier: kManagerLabelsSegue, sender: self)
                 self.coordinator?.go(to: .lableManager)
             case .language:
+                #if targetEnvironment(simulator)
+                self.inAppLanguage(indexPath)
+                #else
                 if #available(iOS 13.0, *) {
                     UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
                 } else {
-                    let current_language = LanguageManager.currentLanguageEnum()
-                    let title = LocalString._settings_current_language_is + current_language.nativeDescription
-                    let alertController = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-                    alertController.addAction(UIAlertAction(title: LocalString._general_cancel_button, style: .cancel, handler: nil))
-                    for l in setting_languages {
-                        if l != current_language {
-                            alertController.addAction(UIAlertAction(title: l.nativeDescription, style: .default, handler: { (action) -> Void in
-                                let _ = self.navigationController?.popViewController(animated: true)
-                                LanguageManager.saveLanguage(byCode: l.code)
-                                LocalizedString.reset()
-                                
-                                self.updateTitle()
-                                self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
-                            }))
-                        }
-                    }
-                    let cell = tableView.cellForRow(at: indexPath)
-                    alertController.popoverPresentationController?.sourceView = cell ?? self.view
-                    alertController.popoverPresentationController?.sourceRect = (cell == nil ? self.view.frame : cell!.bounds)
-                    present(alertController, animated: true, completion: nil)
+                    self.inAppLanguage(indexPath)
+                }
+                #endif
+            case .network:
+                let netItem = setting_network_items[indexPath.row]
+                if netItem == .clear {
+                    DoHMail.default.clearAll()
                 }
             default:
                 break
             }
         }
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+    
+    private func inAppLanguage(_ indexPath: IndexPath) {
+        let current_language = LanguageManager.currentLanguageEnum()
+        let title = LocalString._settings_current_language_is + current_language.nativeDescription
+        let alertController = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+        alertController.addAction(UIAlertAction(title: LocalString._general_cancel_button, style: .cancel, handler: nil))
+        for l in setting_languages {
+            if l != current_language {
+                alertController.addAction(UIAlertAction(title: l.nativeDescription, style: .default, handler: { (action) -> Void in
+                    let _ = self.navigationController?.popViewController(animated: true)
+                    LanguageManager.saveLanguage(byCode: l.code)
+                    LocalizedString.reset()
+                    
+                    self.updateTitle()
+                    //self.userInfo = sharedUserDataService.userInfo ?? self.userInfo
+                }))
+            }
+        }
+        let cell = tableView.cellForRow(at: indexPath)
+        alertController.popoverPresentationController?.sourceView = cell ?? self.view
+        alertController.popoverPresentationController?.sourceRect = (cell == nil ? self.view.frame : cell!.bounds)
+        present(alertController, animated: true, completion: nil)
     }
     
     
@@ -789,37 +869,6 @@ class SettingsTableViewController: ProtonMailTableViewController, ViewModelProto
 
 //    }
     
-}
-
-@available(iOS, deprecated: 13.0, message: "iOS 13 restores state via Deeplinkable conformance")
-extension SettingsTableViewController: UIViewControllerRestoration {
-    static func viewController(withRestorationIdentifierPath identifierComponents: [String], coder: NSCoder) -> UIViewController? {
-        guard let data = coder.decodeObject(forKey: "viewModel") as? Data,
-            let viewModel = (try? JSONDecoder().decode(SettingsViewModelImpl.self, from: data)) else
-        {
-            return nil
-        }
-
-        let next = UIStoryboard(name: "Settings", bundle: .main).make(SettingsTableViewController.self)
-        next.set(viewModel: viewModel)
-        next.set(coordinator: .init(vc: next, vm: viewModel, services: sharedServices))
-
-        return next
-    }
-    
-    override func encodeRestorableState(with coder: NSCoder) {
-        if let viewModel = self.viewModel as? SettingsViewModelImpl,
-            let data = try? JSONEncoder().encode(viewModel)
-        {
-            coder.encode(data, forKey: "viewModel")
-        }
-        super.encodeRestorableState(with: coder)
-    }
-    
-    override func applicationFinishedRestoringState() {
-        super.applicationFinishedRestoringState()
-        UIViewController.setup(self, self.menuButton, self.shouldShowSideMenu())
-    }
 }
 
 extension SettingsTableViewController: Deeplinkable {

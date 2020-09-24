@@ -1,5 +1,5 @@
 //
-//  GeneralSettingViewCell.swift
+//  GeneralSettingSinglelineCell.swift
 //  ProtonMail - Created on 3/17/15.
 //
 //
@@ -28,6 +28,11 @@ class GeneralSettingSinglelineCell: UITableViewCell {
     
     override func awakeFromNib() {
         super.awakeFromNib()
+        
+        if #available(iOS 10, *) {
+            LeftText.font = UIFont.preferredFont(forTextStyle: .footnote)
+            LeftText.adjustsFontForContentSizeCategory = true
+        }
     }
 
     override func setSelected(_ selected: Bool, animated: Bool) {
