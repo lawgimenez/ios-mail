@@ -24,6 +24,7 @@
 import Foundation
 import PromiseKit
 import AwaitKit
+import PMCommon
 
 //TODO:: change to enum
 struct EncryptionStep {
@@ -166,8 +167,9 @@ class ComposeViewModel: NSObject {
         NSException(name:NSExceptionName(rawValue: "name"), reason:"reason", userInfo:nil).raise()
     }
     
-    func deleteAtt(_ att : Attachment!) {
+    func deleteAtt(_ att : Attachment!) -> Promise<Void> {
         NSException(name:NSExceptionName(rawValue: "name"), reason:"reason", userInfo:nil).raise()
+        return Promise()
     }
     
     func markAsRead() {
@@ -187,8 +189,9 @@ class ComposeViewModel: NSObject {
          NSException(name:NSExceptionName(rawValue: "name"), reason:"reason", userInfo:nil).raise()
     }
     
-    func updateEO(expir:TimeInterval, pwd:String, pwdHit:String) -> Void {
+    func updateEO(expir:TimeInterval, pwd:String, pwdHit:String) -> Promise<Void> {
         NSException(name:NSExceptionName(rawValue: "name"), reason:"reason", userInfo:nil).raise()
+        return Promise()
     }
     
     
@@ -221,6 +224,10 @@ class ComposeViewModel: NSObject {
     }
     
     func lockerCheck(model: ContactPickerModelProtocol, progress: () -> Void, complete: ((UIImage?, Int) -> Void)?) {
+        fatalError("This method must be overridden")
+    }
+    
+    func checkMails(in contactGroup: ContactGroupVO, progress: () -> Void, complete: LockCheckComplete?) {
         fatalError("This method must be overridden")
     }
 }

@@ -22,13 +22,15 @@
 
 
 import Foundation
+import PMCommon
+
 // folder editing
 final public class FolderEditingViewModelImple : LabelEditViewModel {
     var currentLabel : Label
     
-    internal init(label: Label, apiService: APIService, labelService: LabelsDataService) {
+    internal init(label: Label, apiService: APIService, labelService: LabelsDataService, coreDataService: CoreDataService) {
         self.currentLabel = label
-        super.init(apiService: apiService, labelService: labelService)
+        super.init(apiService: apiService, labelService: labelService, coreDataService: coreDataService)
     }
     
     override public func title() -> String {
@@ -58,18 +60,18 @@ final public class FolderEditingViewModelImple : LabelEditViewModel {
     
     override public func apply(withName name: String, color: String, error: @escaping LabelEditViewModel.ErrorBlock, complete: @escaping LabelEditViewModel.OkBlock) {
         let api = UpdateLabelRequest(id: currentLabel.labelID, name: name, color: color)
-        api.call(api: self.apiService) { (task, response, hasError) -> Void in
-            if hasError {
-                error(response?.code ?? 1000, response?.errorMessage ?? "");
+        self.apiService.exec(route: api) { (task, response : UpdateLabelRequestResponse) in
+            if let err = response.error {
+                error(err.code, err.localizedDescription)
             } else {
-                self.currentLabel.name = name
-                self.currentLabel.color = color
-                if let context = self.currentLabel.managedObjectContext {
-                    context.perform {
-                        let _ = context.saveUpstreamIfNeeded()
+                self.coreDataService.enqueue(context: self.currentLabel.managedObjectContext) { (context) in
+                    self.currentLabel.name = name
+                    self.currentLabel.color = color
+                    if let error = context.saveUpstreamIfNeeded() {
+                        PMLog.D("error: \(error)")
                     }
+                    complete()
                 }
-                complete()
             }
         }
     }

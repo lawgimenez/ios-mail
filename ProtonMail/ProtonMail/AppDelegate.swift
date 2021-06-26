@@ -24,17 +24,13 @@
 import UIKit
 import SWRevealViewController
 import AFNetworking
-import AFNetworkActivityLogger
 import PMKeymaker
 import UserNotifications
 import Intents
+import PMCommon
+import PMPayments
 
-#if Enterprise
-import Fabric
-import Crashlytics
-#endif
-
-let sharedUserDataService = UserDataService(api: APIService.unauthorized)
+let sharedUserDataService = UserDataService(api: PMAPIService.unauthorized)
 
 @UIApplicationMain
 class AppDelegate: UIResponder {
@@ -42,6 +38,7 @@ class AppDelegate: UIResponder {
         return self.coordinator.currentWindow
     }
     lazy var coordinator: WindowsCoordinator = WindowsCoordinator(services: sharedServices)
+    private var currentState: UIApplication.State = .active
 }
 
 // MARK: - this is workaround to track when the SWRevealViewController first time load
@@ -49,7 +46,7 @@ extension SWRevealViewController {
     open override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         if (segue.identifier == "sw_rear") {
             if let menuViewController =  segue.destination as? MenuViewController {
-                let usersManager : UsersManager = sharedServices.get()
+                let usersManager = sharedServices.get(by: UsersManager.self)
                 let viewModel = MenuViewModelImpl(usersManager: usersManager)
                 let menu = MenuCoordinatorNew(vc: menuViewController, vm: viewModel, services: sharedServices)
                 menu.start()
@@ -59,12 +56,13 @@ extension SWRevealViewController {
                 if let mailboxViewController: MailboxViewController = navigation.firstViewController() as? MailboxViewController {
                     ///TODO::fixme AppDelegate.coordinator.serviceHolder is bad
                     sharedVMService.mailbox(fromMenu: mailboxViewController)
-                    let usersManager : UsersManager = sharedServices.get()
+                    let usersManager = sharedServices.get(by: UsersManager.self)
                     let user = usersManager.firstUser!
                     let viewModel = MailboxViewModelImpl(label: .inbox,
                                                          userManager: user,
                                                          usersManager: usersManager,
-                                                         pushService: sharedServices.get())
+                                                         pushService: sharedServices.get(),
+                                                         coreDataService: sharedServices.get())
                     let mailbox = MailboxCoordinator(vc: mailboxViewController, vm: viewModel, services: sharedServices)
                     mailbox.start()
                 }
@@ -74,7 +72,7 @@ extension SWRevealViewController {
 }
 
 // MARK: - consider move this to coordinator
-extension AppDelegate: APIServiceDelegate, UserDataServiceDelegate {
+extension AppDelegate: UserDataServiceDelegate {
     func onLogout(animated: Bool) {
         if #available(iOS 13.0, *) {
             let sessions = Array(UIApplication.shared.openSessions)
@@ -90,14 +88,32 @@ extension AppDelegate: APIServiceDelegate, UserDataServiceDelegate {
             self.coordinator.go(dest: .signInWindow)
         }
     }
-    
+}
+
+extension AppDelegate: APIServiceDelegate {
     func isReachable() -> Bool {
+        #if !APP_EXTENSION
         return sharedInternetReachability.currentReachabilityStatus() != NetworkStatus.NotReachable
+        #else
+        return sharedInternetReachability.currentReachabilityStatus() != NetworkStatus.NotReachable
+        #endif
     }
-    
-    func onError(error: NSError) {
-        error.alertToast()
+
+    func onUpdate(serverTime: Int64) {
+        Crypto.updateTime(serverTime)
     }
+
+    var appVersion: String {
+        get {
+            return "iOS_\(Bundle.main.majorVersion)"
+        }
+    }
+
+    var userAgent: String? {
+        UserAgent.default.ua
+    }
+
+    func onDohTroubleshot() { }
 }
 
 extension AppDelegate: TrustKitUIDelegate {
@@ -127,11 +143,12 @@ extension AppDelegate: UIApplicationDelegate {
     func application(_ application: UIApplication, willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         sharedServices.get(by: AppCacheService.self).restoreCacheWhenAppStart()
 
-        let usersManager = UsersManager(server: Server.live, delegate: self)
+        let usersManager = UsersManager(doh: DoHMail.default, delegate: self)
         sharedServices.add(UnlockManager.self, for: UnlockManager(cacheStatus: userCachedStatus, delegate: self))
         sharedServices.add(UsersManager.self, for: usersManager)
         sharedServices.add(SignInManager.self, for: SignInManager(usersManager: usersManager))
         sharedServices.add(SpringboardShortcutsService.self, for: SpringboardShortcutsService())
+        sharedServices.add(StoreKitManagerImpl.self, for: StoreKitManagerImpl())
         return true
     }
     
@@ -142,9 +159,6 @@ extension AppDelegate: UIApplicationDelegate {
         PMLog.D("Tmp directory: " + FileManager.default.temporaryDirectoryUrl.absoluteString)
         #endif
 
-        #if Enterprise
-        Fabric.with([Crashlytics.self])
-        #endif
         TrustKitWrapper.start(delegate: self)
         Analytics.shared.setup()
         
@@ -156,24 +170,8 @@ extension AppDelegate: UIApplicationDelegate {
         
         AFNetworkActivityIndicatorManager.shared().isEnabled = true
         
-        //get build mode if debug mode enable network logging
-        let mode = UIApplication.shared.releaseMode()
-        //network debug options
-        if let logger = AFNetworkActivityLogger.shared().loggers.first as? AFNetworkActivityConsoleLogger {
-            logger.level = .AFLoggerLevelDebug;
-        }
         //start network notifier
         sharedInternetReachability.startNotifier()
-        
-        // moved to coordinator
-        //sharedMessageDataService.launchCleanUpIfNeeded()
-        //sharedUserDataService.delegate = self
-        
-        AFNetworkActivityLogger.shared().startLogging()
-        if mode != .dev && mode != .sim {
-            AFNetworkActivityLogger.shared().stopLogging()
-        }
-        AFNetworkActivityLogger.shared().stopLogging()
         
         // setup language: iOS 13 allows setting language per-app in Settings.app, so we trust that value
         // we still use LanguageManager because Bundle.main of Share extension will take the value from host application :(
@@ -188,6 +186,7 @@ extension AppDelegate: UIApplicationDelegate {
         pushService.registerForRemoteNotifications()
         pushService.setLaunchOptions(launchOptions)
         
+        StoreKitManager.default.delegate = sharedServices.get(by: StoreKitManagerImpl.self)
         StoreKitManager.default.subscribeToPaymentQueue()
         StoreKitManager.default.updateAvailableProductsList()
         
@@ -195,14 +194,19 @@ extension AppDelegate: UIApplicationDelegate {
         NotificationCenter.default.addObserver(forName: Keymaker.Const.errorObtainingMainKey, object: nil, queue: .main) { notification in
             (notification.userInfo?["error"] as? Error)?.localizedDescription.alertToast()
         }
-        NotificationCenter.default.addObserver(forName: Keymaker.Const.obtainedMainKey, object: nil, queue: .main) { notification in
-            "Obtained main key".alertToastBottom()
-        }
         NotificationCenter.default.addObserver(forName: Keymaker.Const.removedMainKeyFromMemory, object: nil, queue: .main) { notification in
             "Removed main key from memory".alertToastBottom()
         }
         #endif
-        
+        NotificationCenter.default.addObserver(forName: Keymaker.Const.obtainedMainKey, object: nil, queue: .main) { notification in
+            #if DEBUG
+                "Obtained main key".alertToastBottom()
+            #endif
+            
+            if self.currentState != .active {
+                keymaker.updateAutolockCountdownStart()
+            }
+        }
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(didSignOutNotification(_:)),
                                                name: NSNotification.Name.didSignOut,
@@ -262,14 +266,14 @@ extension AppDelegate: UIApplicationDelegate {
             return false
         }
         
-        
-        if ["protonmail", "mailto"].contains(urlComponents.scheme) {
+        if ["protonmail", "mailto"].contains(urlComponents.scheme) || "mailto".caseInsensitiveCompare(urlComponents.scheme ?? "") == .orderedSame {
             var path = url.absoluteString
             if urlComponents.scheme == "protonmail" {
                 path = path.preg_replace("protonmail://", replaceto: "")
             }
             
             let deeplink = DeepLink(String(describing: MailboxViewController.self), sender: Message.Location.inbox.rawValue)
+            deeplink.append(DeepLink.Node(name: "toMailboxSegue", value: Message.Location.inbox))
             deeplink.append(DeepLink.Node(name: "toComposeMailto", value: path))
             self.coordinator.followDeeplink(deeplink)
             return true
@@ -297,20 +301,31 @@ extension AppDelegate: UIApplicationDelegate {
     
     @available(iOS, deprecated: 13, message: "This method will not get called on iOS 13, move the code to WindowSceneDelegate.sceneDidEnterBackground()" )
     func applicationDidEnterBackground(_ application: UIApplication) {
+        self.currentState = .background
         keymaker.updateAutolockCountdownStart()
         
+        let users: UsersManager = sharedServices.get()
+        
         var taskID = UIBackgroundTaskIdentifier(rawValue: 0)
-        taskID = application.beginBackgroundTask { PMLog.D("Background Task Timed Out") }
+        taskID = application.beginBackgroundTask {
+            PMLog.D("Background Task Timed Out")
+            application.endBackgroundTask(taskID)
+            taskID = .invalid
+        }
         let delayedCompletion: ()->Void = {
             delay(3) {
                 PMLog.D("End Background Task")
-                application.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: taskID.rawValue))
+                application.endBackgroundTask(taskID)
+                taskID = .invalid
             }
         }
         
-        let users: UsersManager = sharedServices.get()
         if let user = users.firstUser {
+            user.messageService.backgroundTimeRemaining = {
+                application.backgroundTimeRemaining
+            }
             user.messageService.purgeOldMessages()
+            user.messageService.cleanOldAttachment()
             user.messageService.updateMessageCount()
             user.messageService.backgroundFetch {
                 delayedCompletion()
@@ -336,14 +351,24 @@ extension AppDelegate: UIApplicationDelegate {
     
     func applicationWillTerminate(_ application: UIApplication) {
         //TODO::here need change to notify composer to save editing draft
-        let mainContext = CoreDataService.shared.mainManagedObjectContext
+        let coreDataService = sharedServices.get(by: CoreDataService.self)
+        let mainContext = coreDataService.mainManagedObjectContext
         mainContext.performAndWait {
             let _ = mainContext.saveUpstreamIfNeeded()
         }
         
-        let backgroundContext = CoreDataService.shared.mainManagedObjectContext
+        let backgroundContext = coreDataService.backgroundManagedObjectContext
         backgroundContext.performAndWait {
             let _ = backgroundContext.saveUpstreamIfNeeded()
+        }
+    }
+    
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        self.currentState = .active
+        let users: UsersManager = sharedServices.get()
+        users.users.forEach { (user) in
+            user.messageService.unBlockQueueAction()
+            user.messageService.backgroundTimeRemaining = nil
         }
     }
     
@@ -360,11 +385,15 @@ extension AppDelegate: UIApplicationDelegate {
         usersManager.firstUser?.messageService.backgroundFetch(notify: {
             completionHandler(.newData)
         })
+        //HACK: Call this after n seconds to prevent app got killed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) {
+            completionHandler(.newData)
+        }
     }
     
     // MARK: Notification methods
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        Analytics.shared.logCustomEvent(customAttributes:[ "LogTitle": "NotificationError", "error" : "\(error)"])
+        Analytics.shared.error(message: .notificationError, error: error)
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

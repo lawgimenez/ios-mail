@@ -79,20 +79,7 @@ class MessageViewModel: NSObject {
         self.header = HeaderData(message: message)
         
         // 2. body
-        var body: String? = nil
-        do {
-            body = try messageService.decryptBodyIfNeeded(message: message) ?? LocalString._unable_to_decrypt_message
-        } catch let ex as NSError {
-            PMLog.D("purifyEmailBody error : \(ex)")
-            body = message.bodyToHtml()
-        }
-        if expired {
-            body = LocalString._message_expired
-        }
-        if !message.isDetailDownloaded {
-            body = nil
-        }
-        self.body = body
+        self.body = ""
         
         // 3. attachments
         var atts: [AttachmentInfo] = (message.attachments.allObjects as? [Attachment])?.map(AttachmentNormal.init) ?? [] // normal
@@ -119,7 +106,7 @@ class MessageViewModel: NSObject {
         self.divisionsCount = self.divisions.count
         
         super.init()
-        
+        self.decryptBody(message: message, expired: expired, shouldRetry: true)
         // there was a method embedding images here, revert and debug in case of problems
         
         if let expirationOffset = message.expirationTime?.timeIntervalSinceNow, expirationOffset > 0 {
@@ -136,9 +123,10 @@ class MessageViewModel: NSObject {
         self.attachments = temp.attachments
         self.divisions = temp.divisions
         
-        DispatchQueue.global().async {
+        DispatchQueue.global().async { [weak self] in
             let hasImage = (temp.body ?? "").hasImage() // this method is slow
             DispatchQueue.main.async {
+                guard let self = self else { return }
                 if hasImage && !self.user.autoLoadRemoteImages { // we only care if there is remote content and loading is not allowed
                     self.remoteContentMode = .disallowed
                 }
@@ -188,7 +176,9 @@ class MessageViewModel: NSObject {
             if checkCount == strings.count {
                 var updatedBody = body
                 for (cid, base64) in strings {
-                    updatedBody = updatedBody.stringBySetupInlineImage(cid, to: base64)
+                    if let token = updatedBody.range(of: cid) {
+                        updatedBody.replaceSubrange(token, with: base64)
+                    }
                 }
                 
                 self.body = updatedBody
@@ -198,5 +188,37 @@ class MessageViewModel: NSObject {
                 }
             }
         }
+    }
+    
+    private func getAddressKeys(message: Message, expired: Bool) {
+        let req = GetAddressesRequest()
+        self.user.apiService.exec(route: req) { (_, res: AddressesResponse) in
+            guard res.error == nil else { return }
+            self.user.userinfo.set(addresses: res.addresses)
+            self.user.save()
+            self.decryptBody(message: message,
+                             expired: expired, shouldRetry: false)
+        }
+    }
+    
+    private func decryptBody(message: Message, expired: Bool, shouldRetry: Bool) {
+        var body: String? = nil
+        do {
+            body = try messageService.decryptBodyIfNeeded(message: message) ?? LocalString._unable_to_decrypt_message
+        } catch let ex as NSError {
+            PMLog.D("purifyEmailBody error : \(ex)")
+            body = message.bodyToHtml()
+            if shouldRetry {
+                self.getAddressKeys(message: message, expired: expired)
+                return
+            }
+        }
+        if expired {
+            body = LocalString._message_expired
+        }
+        if !message.isDetailDownloaded {
+            body = nil
+        }
+        self.body = body
     }
 }

@@ -23,52 +23,77 @@
 
 import Foundation
 import PromiseKit
+import PMCommon
 
 typealias CheckUserNameBlock = (Result<CheckUserExistResponse.AvailabilityStatus>) -> Void
 typealias CreateUserBlock = (Bool, Bool, String, Error?) -> Void
 typealias GenerateKey = (Bool, String?, NSError?) -> Void
-typealias SendVerificationCodeBlock = (Bool, NSError?) -> Void
+typealias SendVerificationCodeBlock = (NSError?) -> Void
 
-// MARK : update right swipe action
-class CreateNewUser : ApiRequest<ApiResponse> {
+
+//Users API
+//Doc: https://github.com/ProtonMail/Slim-API/blob/develop/api-spec/pm_api_users.md
+struct UsersAPI {
+    //
+    static let path : String = "/users"
+    
+    /// Check if username already taken [GET]
+    static let v_check_is_user_exist : Int = 3
+    
+    /// Check if direct user signups are enabled [GET]
+    static let v_get_user_direct : Int = 3
+    
+    /// Get user's info [GET]
+    static let v_get_userinfo : Int = 3
+    
+    /// Get options for human verification [GET]
+    static let v_get_human_verify_options : Int = 3
+    
+    /// Verify user is human [POST]
+    static let v_verify_human : Int = 3
+    
+    /// Create user [POST]
+    static let v_create_user : Int = 3
+    
+    /// Send a verification code [POST]
+    static let v_send_verification_code : Int = 3
+}
+
+// MARK : update right swipe action -- Response
+class CreateNewUser : Request {
     
     let userName : String
     let recaptchaToken : String
     let email : String
     let tokenType : String
     
-    let modulusID : String //encrypted_id
-    let salt : String //base64_encoded_salt
-    let verifer : String //base64_encoded_verifier
+    let passwordAuth: PasswordAuth
     
     let deviceToken : String
+    let challenge: [String: Any]
     
     init(token : String,
          type : String,
          username :String,
          email:String,
-         
-         modulusID : String,
-         salt : String,
-         verifer : String, deviceToken: String) {
+         passwordAuth: PasswordAuth,
+         deviceToken: String,
+         challenge: [String: Any]) {
         self.recaptchaToken = token
         self.tokenType = type
         self.userName = username
         self.email = email
+
+        self.passwordAuth = passwordAuth
         
-        self.modulusID = modulusID
-        self.salt = salt
-        self.verifer = verifer
         self.deviceToken = deviceToken
+        self.challenge = challenge
     }
-    
-    override func toDictionary() -> [String : Any]? {
+    var parameters: [String : Any]? {
         
-        let auth : [String : Any] = [
-            "Version" : 4,
-            "ModulusID" : self.modulusID,
-            "Salt" : self.salt,
-            "Verifier" : self.verifer
+        let payload: [String: Any] = [
+            "mail-ios-payload": deviceToken,
+            "mail-ios-challenge": self.challenge
         ]
         
         let out : [String : Any] = [
@@ -76,47 +101,52 @@ class CreateNewUser : ApiRequest<ApiResponse> {
             "Username" : self.userName,
             "Email" : self.email,
             "Token" : self.recaptchaToken,
-            "Auth" : auth,
+            "Auth" : self.passwordAuth.parameters,
             "Type" : 1,   //hard code to 1 for mail
-            "Payload": ["mail-ios-payload" :  deviceToken ]
+            "Payload": payload
         ]
         return out
     }
     
-    override func getIsAuthFunction() -> Bool {
+    var isAuth: Bool {
         return false
     }
     
-    override func method() -> HTTPMethod {
+    var method: HTTPMethod {
         return .post
     }
     
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_create_user
     }
 }
 
-final class GetUserInfoRequest : ApiRequestNew<GetUserInfoResponse> {
-
-    override func method() -> HTTPMethod {
+///Get user info  --- GetUserInfoResponse
+final class GetUserInfoRequest : Request {
+    
+    init(authCredential: AuthCredential? = nil) {
+        self.auth = authCredential
+    }
+    
+    var method: HTTPMethod {
         return .get
     }
     
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path
     }
     
-    override func apiVersion() -> Int {
-        return UsersAPI.v_get_userinfo
-    }
+    //custom auth credentical
+    var auth: AuthCredential?
+    var authCredential : AuthCredential? {
+        get {
+            return self.auth
+        }
+    }    
 }
 
 
-final class GetUserInfoResponse : ApiResponse {
+final class GetUserInfoResponse : Response {
     var userInfo : UserInfo?
     
     override func ParseResponse(_ response: [String : Any]!) -> Bool {
@@ -128,30 +158,14 @@ final class GetUserInfoResponse : ApiResponse {
     }
 }
 
-
-class GetHumanCheckToken : ApiRequest<GetHumanCheckResponse> {
-    
-    override init() {
-    }
-    
-    override func toDictionary() -> [String : Any]? {
-        return nil
-    }
-    
-    override func method() -> HTTPMethod {
-        return .get
-    }
-    
-    override func path() -> String {
+/// GetHumanCheckResponse
+class GetHumanCheckToken : Request {
+    var path: String {
         return UsersAPI.path + "/human"
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_get_human_verify_options
     }
 }
 
-class GetHumanCheckResponse : ApiResponse {
+class GetHumanCheckResponse : Response {
     var token : String?
     var type : [String]?
     override func ParseResponse(_ response: [String : Any]!) -> Bool {
@@ -161,7 +175,8 @@ class GetHumanCheckResponse : ApiResponse {
     }
 }
 
-class HumanCheckRequest : ApiRequest<ApiResponse> {
+/// -- Response
+class HumanCheckRequest : Request {
     var token : String
     var type : String
     
@@ -170,54 +185,37 @@ class HumanCheckRequest : ApiRequest<ApiResponse> {
         self.type = type
     }
     
-    override func toDictionary() -> [String : Any]? {
+    var parameters: [String : Any]? {
         let out : [String : Any] =  ["Token":self.token, "TokenType":self.type ]
         return out
     }
     
-    override func method() -> HTTPMethod {
+    var method: HTTPMethod {
         return .post
     }
     
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path + "/human"
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_verify_human
     }
 }
 
-class CheckUserExist : ApiRequest<CheckUserExistResponse> {
+///CheckUserExistResponse
+class CheckUserExist : Request {
     
     let userName : String
-    
     init(userName : String) {
         self.userName = userName;
     }
-    
-    override func toDictionary() -> [String : Any]? {
-        return nil
-    }
-    
-    override func getIsAuthFunction() -> Bool {
+    var isAuth: Bool {
         return false
     }
-    
-    override func method() -> HTTPMethod {
-        return .get
-    }
-    
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path + "/available?Name=" + (userName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_check_is_user_exist
     }
 }
 
-class CheckUserExistResponse : ApiResponse {
+//TODO:: fix me before duouble check 
+class CheckUserExistResponse : Response {
     enum AvailabilityStatus {
         case available
         case invalidCharacters(reason: String)
@@ -241,7 +239,7 @@ class CheckUserExistResponse : ApiResponse {
     
     internal var availabilityStatus : AvailabilityStatus?
     
-    override func ParseHttpError(_ error: NSError, response: [String : Any]?) {
+    func ParseHttpError(_ error: NSError, response: [String : Any]?) {
         guard let response = response else { return }
         
         PMLog.D(response.json(prettyPrinted: true))
@@ -264,31 +262,18 @@ class CheckUserExistResponse : ApiResponse {
     }
 }
 
-
-class DirectRequest : ApiRequest<DirectResponse> {
+///DirectResponse
+class DirectRequest : Request {
     
-    override func toDictionary() -> [String : Any]? {
-        return nil
-    }
-    
-    override func getIsAuthFunction() -> Bool {
+    var isAuth: Bool {
         return false
     }
-    
-    override func method() -> HTTPMethod {
-        return .get
-    }
-    
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path + "/direct"  //type (optional, integer, 1) ... 1 => mail, 2 => VPN
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_get_user_direct
     }
 }
 
-class DirectResponse : ApiResponse {
+class DirectResponse : Response {
     var isSignUpAvailable : Int = 1
     var signupFunctions : [String]?
     override func ParseResponse(_ response: [String : Any]!) -> Bool {
@@ -320,20 +305,21 @@ enum VerifyCodeType : Int {
     }
 }
 
-class VerificationCodeRequest : ApiRequest<ApiResponse> {
+///Response
+class VerificationCodeRequest : Request {
     
-    let userName : String!
-    let destination : String!
-    let type : VerifyCodeType!
+    let userName : String
+    let destination : String
+    let type : VerifyCodeType
     let platform : String = "ios"
     
-    init(userName : String!, destination : String!, type : VerifyCodeType!) {
+    init(userName : String, destination : String, type : VerifyCodeType) {
         self.userName = userName
         self.destination = destination
         self.type = type
     }
     
-    override func toDictionary() -> [String : Any]? {
+    var parameters: [String : Any]? {
         let dest = type == .email ? ["Address" : destination] : ["Phone" : destination]
         let out : [String : Any] = [
             "Username" : userName,
@@ -344,19 +330,15 @@ class VerificationCodeRequest : ApiRequest<ApiResponse> {
         return out
     }
     
-    override func getIsAuthFunction() -> Bool {
+    var isAuth: Bool {
         return false
     }
     
-    override func method() -> HTTPMethod {
+    var method: HTTPMethod {
         return .post
     }
     
-    override func path() -> String {
+    var path: String {
         return UsersAPI.path + "/code"
-    }
-    
-    override func apiVersion() -> Int {
-        return UsersAPI.v_send_verification_code
     }
 }

@@ -23,6 +23,7 @@
 
 import Foundation
 import MBProgressHUD
+import PMPayments
 
 class ReportBugsViewController: ProtonMailViewController {
     var user: UserManager!
@@ -34,6 +35,7 @@ class ReportBugsViewController: ProtonMailViewController {
     @IBOutlet weak var topTitleLabel: UILabel!
     
     private var kSegueToTroubleshoot : String = "toTroubleShootSegue"
+    private var reportSent: Bool = false
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -67,8 +69,26 @@ class ReportBugsViewController: ProtonMailViewController {
         NotificationCenter.default.removeKeyboardObserver(self)
     }
     
-    // MARK: - Private methods
     
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard let keywindow = UIApplication.shared.keyWindow, self.reportSent else { return }
+        keywindow.enumerateViewControllerHierarchy { (controller, stop) in
+            guard controller is MenuViewController else {return}
+            let alert = UIAlertController(title: LocalString._bug_report_received,
+                                          message: LocalString._thank_you_for_submitting_a_bug_report_we_have_added_your_report_to_our_bug_tracking_system,
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: LocalString._general_ok_action, style: .default, handler: { (_) in
+                
+            }))
+            controller.present(alert, animated: true, completion: {
+                
+            })
+            
+            stop = true
+        }
+    }
+    // MARK: - Private methods
     fileprivate func reset() {
         textView.text = ""
         cachedBugReport.cachedBug = ""
@@ -106,10 +126,12 @@ class ReportBugsViewController: ProtonMailViewController {
         let v : UIView = self.navigationController?.view ?? self.view
         MBProgressHUD.showAdded(to: v, animated: true)
         sendButton.isEnabled = false
-        _ = self.user.reportService.reportBug(text,
-                                              username: self.user.displayName,
-                                              email: self.user.defaultEmail, completion: { error in
-            MBProgressHUD.hide(for: self.view, animated: true)
+        let username = self.user.defaultEmail.split(separator: "@")[0]
+        self.user.reportService.reportBug(text,
+                                          username: String(username),
+                                          email: self.user.defaultEmail,
+                                          completion: { error in
+            MBProgressHUD.hide(for: v, animated: true)
             self.sendButton.isEnabled = true
             if let error = error {
                 guard !self.checkDoh(error) else {
@@ -119,15 +141,9 @@ class ReportBugsViewController: ProtonMailViewController {
                 alert.addAction(UIAlertAction(title: LocalString._general_ok_action, style: .default, handler: nil))
                 self.present(alert, animated: true, completion: nil)
             } else {
-                let alert = UIAlertController(title: LocalString._bug_report_received,
-                                              message: LocalString._thank_you_for_submitting_a_bug_report_we_have_added_your_report_to_our_bug_tracking_system,
-                                              preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: LocalString._general_ok_action, style: .default, handler: nil))
-                self.present(alert, animated: true, completion: {
-                    self.reset()
-                    ///TODO::fixme consider move this after clicked ok button.
-                    NotificationCenter.default.post(name: .switchView, object: nil)
-                })
+                self.reportSent = true
+                self.reset()
+                NotificationCenter.default.post(name: .switchView, object: nil)
             }
         })
     }

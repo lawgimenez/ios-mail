@@ -24,7 +24,7 @@
 import UIKit
 import MBProgressHUD
 
-class SignUpUserNameViewController: UIViewController, UIWebViewDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UITextViewDelegate {
+class SignUpUserNameViewController: UIViewController, UIPickerViewDataSource, UIPickerViewDelegate, UITextViewDelegate {
     
     @IBOutlet weak var usernameTextField: TextInsetTextField!
     @IBOutlet weak var pickedDomainLabel: UILabel!
@@ -90,6 +90,7 @@ class SignUpUserNameViewController: UIViewController, UIWebViewDelegate, UIPicke
     override func viewDidLoad() {
         super.viewDidLoad()
         resetChecking()
+        self.viewModel.observeTextField(textField: usernameTextField, type: .username)
         usernameTextField.attributedPlaceholder = NSAttributedString(string: LocalString._username,
                                                                      attributes:[NSAttributedString.Key.foregroundColor : UIColor(hexColorCode: "#9898a8")])
         MBProgressHUD.showAdded(to: view, animated: true)
@@ -382,7 +383,6 @@ extension SignUpUserNameViewController: UITextFieldDelegate {
     
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         dismissKeyboard()
-        checkUserName();
         return true
     }
 }

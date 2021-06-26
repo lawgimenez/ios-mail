@@ -23,6 +23,8 @@
 
 import UIKit
 import MBProgressHUD
+import PromiseKit
+import PMCommon
 
 var sharedUserDataService : UserDataService!
 
@@ -59,7 +61,8 @@ class ShareUnlockViewController: UIViewController, CoordinatedNew, BioCodeViewDe
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        sharedUserDataService = UserDataService(api: APIService.shared)//TODO:: fix me
+        
+        sharedUserDataService = UserDataService(api: PMAPIService.shared)
         LanguageManager.setupCurrentLanguage()
         configureNavigationBar()
         
@@ -237,13 +240,17 @@ extension ShareUnlockViewController: AttachmentController, FileImporter {
         self.localized_errors.append(description)
     }
     
-    func fileSuccessfullyImported(as fileData: FileData) {
-        guard fileData.contents.dataSize < (self.kDefaultAttachmentFileSize - self.currentAttachmentSize) else {
-            self.error(LocalString._the_total_attachment_size_cant_be_bigger_than_25mb)
-            return
-        }
+    func fileSuccessfullyImported(as fileData: FileData) -> Promise<Void> {
+        return Promise { seal in
+            guard fileData.contents.dataSize < (self.kDefaultAttachmentFileSize - self.currentAttachmentSize) else {
+                self.error(LocalString._the_total_attachment_size_cant_be_bigger_than_25mb)
+                seal.fulfill_()
+                return
+            }
 
-        self.files.append(fileData)
+            self.files.append(fileData)
+            seal.fulfill_()
+        }
     }
 }
 

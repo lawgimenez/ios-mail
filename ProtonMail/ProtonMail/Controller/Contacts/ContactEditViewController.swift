@@ -122,6 +122,7 @@ class ContactEditViewController: ProtonMailViewController, ViewModelProtocol {
                                         style: UIBarButtonItem.Style.plain,
                                         target: self, action: #selector(ContactEditViewController.doneAction))
         self.navigationItem.rightBarButtonItem = doneItem
+        self.navigationItem.assignNavItemIndentifiers()
         
         if viewModel.isNew() {
             self.title = LocalString._contacts_add_contact
@@ -340,23 +341,10 @@ extension ContactEditViewController: ContactEditCellDelegate, ContactEditTextVie
     }
     
     func didChanged(textView: UITextView) {
-        if #available(iOS 11.0, *) {
-            UIView.setAnimationsEnabled(false)
-            self.tableView.beginUpdates()
-            self.tableView.endUpdates()
-            UIView.setAnimationsEnabled(true)
-        } else {
-            synced(self, closure: {
-                UIView.setAnimationsEnabled(false)
-                if let active = self.activeText, active == textView {
-                    if let cell = textView.superview?.superview as? UITableViewCell, let _ = self.tableView.indexPath(for: cell) {
-                        self.tableView.beginUpdates()
-                        self.tableView.endUpdates()
-                    }
-                }
-                UIView.setAnimationsEnabled(true)
-            })
-        }
+        UIView.setAnimationsEnabled(false)
+        self.tableView.beginUpdates()
+        self.tableView.endUpdates()
+        UIView.setAnimationsEnabled(true)
     }
     
     func synced(_ lock: Any, closure: () -> ()) {
@@ -404,7 +392,12 @@ extension ContactEditViewController : UpgradeAlertVCDelegate {
     }
     
     func learnMore() {
-        UIApplication.shared.openURL(.paidPlans)
+        self.showingUpgrade = false
+        if #available(iOS 10.0, *) {
+            UIApplication.shared.open(.paidPlans, options: [:], completionHandler: nil)
+        } else {
+            UIApplication.shared.openURL(.paidPlans)
+        }
     }
     
     func cancel() {

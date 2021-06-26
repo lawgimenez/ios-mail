@@ -23,6 +23,7 @@
 
 import Foundation
 import PromiseKit
+import PMCommon
 
 class MessageHeaderViewModel: NSObject {
     @objc dynamic var headerData: HeaderData
@@ -31,25 +32,29 @@ class MessageHeaderViewModel: NSObject {
     private(set) var parentViewModel: MessageViewModel 
     private var parentObservation: NSKeyValueObservation!
     private var messageObservation: NSKeyValueObservation!
+    private let coreDataService: CoreDataService
     
 
     let messageService: MessageDataService
     let user : UserManager
     
-    init(parentViewModel: MessageViewModel, message: Message) {
+    init(parentViewModel: MessageViewModel, message: Message, coreDataService: CoreDataService) {
         self.message = message
         self.headerData = parentViewModel.header
         self.parentViewModel = parentViewModel
         self.messageService = parentViewModel.messageService
         self.user = parentViewModel.user
+        self.coreDataService = coreDataService
         super.init()
         
         self.parentObservation = parentViewModel.observe(\.header) { [weak self] parentViewModel, _ in
             self?.headerData = parentViewModel.header
         }
         self.messageObservation = message.observe(\.labels, options: [.old, .new]) { [weak self] message, change in
-            guard change.newValue != change.oldValue else { return }
-            self?.headerData = HeaderData(message: message)
+            DispatchQueue.main.async {
+                guard change.newValue != change.oldValue else { return }
+                self?.headerData = HeaderData(message: message)
+            }
         }
     }
     
@@ -94,15 +99,15 @@ extension MessageHeaderViewModel {
                                 return
                             }
                             
-                            let context = CoreDataService.shared.backgroundManagedObjectContext
-                            let getEmail = UserEmailPubKeys(email: emial, api: user.apiService).run()
+                            let context = self.coreDataService.mainManagedObjectContext
+                            let getEmail: Promise<KeysResponse> = user.apiService.run(route: UserEmailPubKeys(email: emial))
                             let contactService = self.user.contactService
                             let getContact = contactService.fetch(byEmails: [emial], context: context)
                             when(fulfilled: getEmail, getContact).done { keyRes, contacts in
                                 //internal emails
                                 if keyRes.recipientType == 1 {
-                                    if let contact = contacts.first, let pgpKeys = contact.pgpKeys {
-                                        let status = self.messageService.verifyBody(self.message, verifier: pgpKeys, passphrase: self.user.mailboxPassword)
+                                    if let contact = contacts.first {
+                                        let status = self.messageService.verifyBody(self.message, verifier: contact.pgpKeys, passphrase: self.user.mailboxPassword)
                                         switch status {
                                         case .ok:
                                             c.pgpType = .internal_trusted_key
@@ -115,8 +120,8 @@ extension MessageHeaderViewModel {
                                         }
                                     }
                                 } else {
-                                    if let contact = contacts.first, let pgpKeys = contact.pgpKeys {
-                                        let status = self.messageService.verifyBody(self.message, verifier: pgpKeys, passphrase: self.user.mailboxPassword)
+                                    if let contact = contacts.first {
+                                        let status = self.messageService.verifyBody(self.message, verifier: contact.pgpKeys, passphrase: self.user.mailboxPassword)
                                         switch status {
                                         case .ok:
                                             if c.pgpType == .zero_access_store {
@@ -139,11 +144,11 @@ extension MessageHeaderViewModel {
                                 self.message.checkedSign = true
                                 self.message.checkingSign = false
                                 complete?(c.lock, c.pgpType.rawValue)
-                            }.catch({ (error) in
+                            }.catch(policy: .allErrors) { (error) in
                                 self.message.checkingSign = false
                                 PMLog.D(error.localizedDescription)
                                 complete?(nil, -1)
-                            })
+                            }
                             
                         }
                     }

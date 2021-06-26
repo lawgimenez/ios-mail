@@ -23,6 +23,7 @@
 
 import UIKit
 import SWRevealViewController
+import PMPayments
 
 class StorefrontCoordinator: PushCoordinator {
     var configuration: ((StorefrontCollectionViewController) -> ())?
@@ -50,11 +51,17 @@ class StorefrontCoordinator: PushCoordinator {
         self.navigationController = UINavigationController(rootViewController: vc)
     }
     
-    func go(to nextPlan: ServicePlan) {
+    func go(to nextPlan: AccountPlan) {
         guard let navigationController = self.navigationController else { return }
+        let havingVpnPlan = viewController?.viewModel.isHavingVpnPlanInCurrentSubscription ?? false
         let nextCoordinator = StorefrontCoordinator(navigation: navigationController, user: self.user)
-        let storefront = Storefront(plan: nextPlan, servicePlanService: user.sevicePlanService, user: user.userInfo)
-        nextCoordinator.viewController?.viewModel = StorefrontViewModel(storefront: storefront, servicePlanService: user.sevicePlanService)
+        let storefront = Storefront(plan: nextPlan,
+                                    servicePlanService: user.sevicePlanService,
+                                    user: user.userInfo,
+                                    isHavingVpnPlan: havingVpnPlan)
+        nextCoordinator.viewController?.viewModel = StorefrontViewModel(currentUser: self.user,
+                                                                        storefront: storefront,
+                                                                        havingVpnPlan: havingVpnPlan)
 
         nextCoordinator.start()
     }
@@ -63,9 +70,15 @@ class StorefrontCoordinator: PushCoordinator {
         guard let navigationController = self.navigationController else { return }
         let nextCoordinator = StorefrontCoordinator(navigation: navigationController, user: self.user)
         let storefront = Storefront(creditsFor: subscription, servicePlanService: user.sevicePlanService, user: user.userInfo)
-        nextCoordinator.viewController?.viewModel = StorefrontViewModel(storefront: storefront, servicePlanService: user.sevicePlanService)
-
+        nextCoordinator.viewController?.viewModel = StorefrontViewModel(currentUser: self.user, storefront: storefront)
         nextCoordinator.start()
+    }
+
+    func openProtonWebPage() {
+        if let url = URL(string: "https://mail.protonmail.com/"),
+           UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
     }
     
     private var observation: NSKeyValueObservation!
@@ -83,5 +96,14 @@ class StorefrontCoordinator: PushCoordinator {
         } else if let vc = self.viewController {
             navigationController?.pushViewController(vc, animated: animated)
         }
+    }
+    
+    func goToInbox() {
+        guard let menuVC = self.rvc?.rearViewController as? MenuViewController,
+              let coord = menuVC.getCoordinator() as? MenuCoordinatorNew else {
+            return
+        }
+        
+        coord.go(to: .mailbox)
     }
 }

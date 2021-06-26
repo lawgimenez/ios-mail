@@ -24,6 +24,7 @@
 import Foundation
 import CoreData
 import UIKit
+import PromiseKit
 
 class MenuViewModelImpl : MenuViewModel {
     private let kMenuCellHeight: CGFloat = 44.0
@@ -79,6 +80,7 @@ class MenuViewModelImpl : MenuViewModel {
     func updateCurrent(row: Int) {
         self.currentUser = self.usersManager.user(at: row)
         self.usersManager.active(index: row)
+        _ = self.currentUser?.sevicePlanService.updateServicePlans()
     }
     
     func updateCurrent() {
@@ -101,16 +103,23 @@ class MenuViewModelImpl : MenuViewModel {
     
     //
     let usersManager : UsersManager
+
+    private var labelDataService: LabelsDataService? {
+        guard let labelService = self.currentUser?.labelService else {
+            Analytics.shared.debug(message: .menuSetupFailed, extra: ["IsUserNil": self.currentUser == nil], user: self.currentUser)
+            return nil
+        }
+        return labelService
+    }
     
     //
-    lazy var labelDataService : LabelsDataService = self.currentUser!.labelService
-    
+
     init(usersManager : UsersManager) {
         self.usersManager = usersManager
     }
     
     // user at the moment of creation of this MenuViewModel instance
-    lazy var currentUser: UserManager? = {
+    lazy var currentUser: UserManager? = { [unowned self] in
         return self.usersManager.firstUser
     }()
     
@@ -129,17 +138,10 @@ class MenuViewModelImpl : MenuViewModel {
         if !userCachedStatus.isPinCodeEnabled, !userCachedStatus.isTouchIDEnabled {
             otherItems = otherItems.filter { $0 != .lockapp }
         }
-        if let user = self.currentUser, !user.sevicePlanService.isIAPAvailable {
-            otherItems = otherItems.filter { $0 != .servicePlan }
-        }
     }
-    
-    func setupLabels(delegate: NSFetchedResultsControllerDelegate?) {
-        guard let labelService = self.currentUser?.labelService else {
-            return
-        }
-        self.labelDataService = labelService
-        self.fetchedLabels = self.labelDataService.fetchedResultsController(.all)
+
+    func setupLabels(delegate: NSFetchedResultsControllerDelegate?, shouldFetchLabels: Bool) {
+        self.fetchedLabels = self.labelDataService?.fetchedResultsController(.all)
         self.fetchedLabels?.delegate = delegate
         if let fetchedResultsController = fetchedLabels {
             do {
@@ -149,7 +151,8 @@ class MenuViewModelImpl : MenuViewModel {
             }
         }
         ///TODO::fixme not necessary
-        self.labelDataService.fetchLabels()
+        guard shouldFetchLabels else { return }
+        self.labelDataService?.fetchLabels()
     }
     
     func sectionCount() -> Int {
@@ -163,8 +166,12 @@ class MenuViewModelImpl : MenuViewModel {
         return .unknown
     }
     
-    func count(by labelID: String, userID: String? = nil) -> Int {
-        return labelDataService.unreadCount(by: labelID, userID: userID)
+    func count(by labelID: String, userID: String? = nil) -> Promise<Int> {
+        if let service = labelDataService {
+            return service.unreadCount(by: labelID, userID: userID)
+        } else {
+            return Promise.value(0)
+        }
     }
 
     func inboxesCount() -> Int {
@@ -217,10 +224,11 @@ class MenuViewModelImpl : MenuViewModel {
         return IndexPath(row: r, section: s)
     }
     
-    func signOut() {
+    func signOut() -> Promise<Void> {
         if let currentUser = self.currentUser {
-            self.usersManager.logout(user: currentUser)
+            return self.usersManager.logout(user: currentUser)
         }
+        return Promise()
     }
     
     func isCurrentUserHasQueuedMessage() -> Bool {

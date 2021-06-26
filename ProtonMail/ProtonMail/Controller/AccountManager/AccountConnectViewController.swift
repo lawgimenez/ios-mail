@@ -43,6 +43,7 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
     private let animationDuration: TimeInterval = 0.5
     private let buttonDisabledAlpha: CGFloat    = 0.5
     private var isShowpwd      = false
+    private var twoFAFailed = false
     
     //define
     private let hidePriority : UILayoutPriority = UILayoutPriority(rawValue: 1.0)
@@ -63,6 +64,7 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
     @IBOutlet weak var scrollBottomPaddingConstraint: NSLayoutConstraint!
     @IBOutlet weak var loginMidlineConstraint: NSLayoutConstraint!
     
+    
     required init(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)!
     }
@@ -78,6 +80,7 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
         
         let cancelButton = UIBarButtonItem(title: LocalString._general_cancel_button, style: .plain, target: self, action: #selector(cancelAction))
         self.navigationItem.leftBarButtonItem = cancelButton
+        self.navigationItem.assignNavItemIndentifiers()
 
         setupTextFields()
         setupButtons()
@@ -85,6 +88,7 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
         if self.viewModel.username == nil {
             self.showCreateNewAccountButton()
         }
+        generateAccessibilityIdentifiers()
     }
     
     @objc internal func dismiss() {
@@ -132,7 +136,7 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
             if self.usernameTextField.text?.isEmpty != false {
                 usernameTextField.becomeFirstResponder()
             } else if self.passwordTextField.text?.isEmpty != false {
-                passwordTextField.becomeFirstResponder()
+                _ = passwordTextField.becomeFirstResponder()
             }
         }
     }
@@ -205,21 +209,19 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
     }
     
     func generateToken() -> Promise<String> {
-        if #available(iOS 11.0, *) {
-            let currentDevice = DCDevice.current
-            if currentDevice.isSupported {
-                let deferred = Promise<String>.pending()
-                currentDevice.generateToken(completionHandler: { (data, error) in
-                    if let tokenData = data {
-                        deferred.resolver.fulfill(tokenData.base64EncodedString())
-                    } else if let error = error {
-                        deferred.resolver.reject(error)
-                    } else {
-                        deferred.resolver.reject(TokenError.empty)
-                    }
-                })
-                return deferred.promise
-            }
+        let currentDevice = DCDevice.current
+        if currentDevice.isSupported {
+            let deferred = Promise<String>.pending()
+            currentDevice.generateToken(completionHandler: { (data, error) in
+                if let tokenData = data {
+                    deferred.resolver.fulfill(tokenData.base64EncodedString())
+                } else if let error = error {
+                    deferred.resolver.reject(error)
+                } else {
+                    deferred.resolver.reject(TokenError.empty)
+                }
+            })
+            return deferred.promise
         }
         
         #if Enterprise
@@ -271,13 +273,16 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
             case .error(let error):
                 PMLog.D("error: \(error)")
                 MBProgressHUD.hide(for: self.view, animated: true)
-                
-                if cachedTwoCode != nil {
+                guard cachedTwoCode != nil else {
+                    self.handleRequestError(error)
+                    return
+                }
+                if self.twoFAFailed {
+                    self.twoFAFailed = false
                     self.coordinator?.go(to: .twoFACode, sender: self)
-                } else if !error.code.forceUpgrade {
-                    let alertController = error.alertController()
-                    alertController.addOKAction()
-                    self.present(alertController, animated: true, completion: nil)
+                } else {
+                    self.twoFAFailed = true
+                    self.signIn(username: username, password: password, cachedTwoCode: cachedTwoCode)
                 }
             case .ok:
                 MBProgressHUD.hide(for: self.view, animated: true)
@@ -294,6 +299,51 @@ class AccountConnectViewController: ProtonMailViewController, ViewModelProtocol,
                 self.showAlert()
             }
         }
+    }
+    
+    func handleRequestError (_ error : NSError) {
+        let code = error.code
+//        if DoHMail.default.status != .off {
+//            let alertController = error.alertController()
+//            alertController.addOKAction()
+//            self.present(alertController, animated: true, completion: nil)
+//        }
+//        else if code == NSURLErrorNotConnectedToInternet || code == NSURLErrorCannotConnectToHost {
+//            let alertController = error.alertController()
+//            alertController.addOKAction()
+//            self.present(alertController, animated: true, completion: nil)
+//        }
+//        else
+        if !self.checkDoh(error) && !code.forceUpgrade {
+            let alertController = error.alertController()
+            alertController.addOKAction()
+            self.present(alertController, animated: true, completion: nil)
+        }
+        PMLog.D("error: \(error)")
+    }
+    private func checkDoh(_ error : NSError) -> Bool {
+        let code = error.code
+        guard DoHMail.default.codeCheck(code: code) else {
+            return false
+        }
+        
+        //TODO:: don't use FailureReason in the future. also need clean up
+        let message = error.localizedFailureReason ?? error.localizedDescription
+        let alertController = UIAlertController(title: LocalString._protonmail,
+                                                message: message,
+                                                preferredStyle: .alert)
+        alertController.addAction(UIAlertAction(title: "Troubleshoot", style: .default, handler: { action in
+            self.coordinator?.go(to: .troubleShoot)
+        }))
+        alertController.addAction(UIAlertAction(title: LocalString._general_cancel_button, style: .cancel, handler: { action in
+            
+        }))
+        
+//        UIApplication.shared.keyWindow?.rootViewController?.present(alertController, animated: true, completion: nil)
+        
+        self.present(alertController, animated: true, completion: nil)
+
+        return true
     }
 }
 
@@ -354,7 +404,7 @@ extension AccountConnectViewController: UITextFieldDelegate {
     
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == usernameTextField {
-            passwordTextField.becomeFirstResponder()
+            _ = passwordTextField.becomeFirstResponder()
         } else {
             textField.resignFirstResponder()
         }

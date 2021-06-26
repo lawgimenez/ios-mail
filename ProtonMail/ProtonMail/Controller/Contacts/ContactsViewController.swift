@@ -73,16 +73,8 @@ class ContactsViewController: ContactsAndGroupsSharedCode, ViewModelProtocol {
         
         refreshControl.tintColor = UIColor.gray
         refreshControl.tintColorDidChange()
-        
-        if #available(iOS 11.0, *) {
-            self.navigationController?.navigationBar.prefersLargeTitles = false
-        } else {
-            self.navigationController?.navigationBar.setBackgroundImage(.image(with: UIColor.ProtonMail.Nav_Bar_Background),
-                                                                        for: UIBarPosition.any,
-                                                                        barMetrics: UIBarMetrics.default)
-            self.navigationController?.navigationBar.shadowImage = .image(with: UIColor.ProtonMail.Nav_Bar_Background)
-            self.refreshControl.backgroundColor = .white
-        }
+
+        self.navigationController?.navigationBar.prefersLargeTitles = false
         self.definesPresentationContext = true
         self.extendedLayoutIncludesOpaqueBars = true
         self.automaticallyAdjustsScrollViewInsets = false
@@ -90,10 +82,11 @@ class ContactsViewController: ContactsAndGroupsSharedCode, ViewModelProtocol {
         self.tableView.sectionIndexColor = UIColor.ProtonMail.Blue_85B1DE
         
         //get all contacts
-        self.viewModel.setupFetchedResults(delaget: self)
+        self.viewModel.setupFetchedResults(delegate: self)
         self.prepareSearchBar()
         
         prepareNavigationItemRightDefault(self.viewModel.user)
+        generateAccessibilityIdentifiers()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -141,24 +134,19 @@ class ContactsViewController: ContactsAndGroupsSharedCode, ViewModelProtocol {
         self.searchController.automaticallyAdjustsScrollViewInsets = true
         self.searchController.searchBar.sizeToFit()
         self.searchController.searchBar.keyboardType = .default
+        self.searchController.searchBar.keyboardAppearance = .light
         self.searchController.searchBar.autocapitalizationType = .none
         self.searchController.searchBar.isTranslucent = false
         self.searchController.searchBar.tintColor = .white
         self.searchController.searchBar.barTintColor = UIColor.ProtonMail.Nav_Bar_Background
         self.searchController.searchBar.backgroundColor = .clear
-        if #available(iOS 11.0, *) {
-            self.searchViewConstraint.constant = 0.0
-            self.searchView.isHidden = true
-            self.navigationItem.largeTitleDisplayMode = .never
-            self.navigationItem.hidesSearchBarWhenScrolling = false
-            self.navigationItem.searchController = self.searchController
-        } else {
-            self.searchViewConstraint.constant = self.searchController.searchBar.frame.height
-            self.searchView.backgroundColor = UIColor.ProtonMail.Nav_Bar_Background
-            self.searchView.addSubview(self.searchController.searchBar)
-            self.searchController.searchBar.contactSearchSetup(textfieldBG: UIColor.init(hexColorCode: "#82829C"),
-                                                               placeholderColor: UIColor.init(hexColorCode: "#BBBBC9"), textColor: .white)
-        }
+
+        self.searchViewConstraint.constant = 0.0
+        self.searchView.isHidden = true
+        self.navigationItem.largeTitleDisplayMode = .never
+        self.navigationItem.hidesSearchBarWhenScrolling = false
+        self.navigationItem.searchController = self.searchController
+        self.navigationItem.assignNavItemIndentifiers()
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -181,6 +169,7 @@ class ContactsViewController: ContactsAndGroupsSharedCode, ViewModelProtocol {
             sharedVMService.contactGroupEditViewModel(addContactGroupViewController, user: self.viewModel.user, state: .create)
             
         case kSegueToImportView:
+            self.isOnMainView = true
             let popup = segue.destination as! ContactImportViewController
             // TODO: inject it via ViewModel when ContactImportViewController will have one
             popup.user = self.viewModel.user
@@ -234,7 +223,11 @@ extension ContactsViewController: UpgradeAlertVCDelegate {
     }
     
     func learnMore() {
-        UIApplication.shared.openURL(.paidPlans)
+        if #available(iOS 10.0, *) {
+            UIApplication.shared.open(.paidPlans, options: [:], completionHandler: nil)
+        } else {
+            UIApplication.shared.openURL(.paidPlans)
+        }
     }
     
     func cancel() {
@@ -317,6 +310,7 @@ extension ContactsViewController: UITableViewDelegate {
                 
                 alertController.popoverPresentationController?.sourceView = self.tableView
                 alertController.popoverPresentationController?.sourceRect = CGRect(x: self.tableView.bounds.midX, y: self.tableView.bounds.maxY - 100, width: 0, height: 0)
+                alertController.assignActionsAccessibilityIdentifiers()
                 
                 self.present(alertController, animated: true, completion: nil)
             }
@@ -446,6 +440,11 @@ extension ContactsViewController : NSFetchedResultsControllerDelegate {
                                     highlight: self.searchString)
                     }
                 }
+            }
+        case .move:
+            if let indexPath = indexPath, let newIndexPath = newIndexPath {
+                tableView.deleteRows(at: [indexPath], with: .fade)
+                tableView.insertRows(at: [newIndexPath], with: .fade)
             }
         default:
             break

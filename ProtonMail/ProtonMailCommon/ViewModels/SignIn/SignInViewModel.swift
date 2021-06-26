@@ -80,21 +80,19 @@ class SignInViewModel : NSObject {
     }
     
     func generateToken() -> Promise<String> {
-        if #available(iOS 11.0, *) {
-            let currentDevice = DCDevice.current
-            if currentDevice.isSupported {
-                let deferred = Promise<String>.pending()
-                currentDevice.generateToken(completionHandler: { (data, error) in
-                    if let tokenData = data {
-                        deferred.resolver.fulfill(tokenData.base64EncodedString())
-                    } else if let error = error {
-                        deferred.resolver.reject(error)
-                    } else {
-                        deferred.resolver.reject(TokenError.empty)
-                    }
-                })
-                return deferred.promise
-            }
+        let currentDevice = DCDevice.current
+        if currentDevice.isSupported {
+            let deferred = Promise<String>.pending()
+            currentDevice.generateToken(completionHandler: { (data, error) in
+                if let tokenData = data {
+                    deferred.resolver.fulfill(tokenData.base64EncodedString())
+                } else if let error = error {
+                    deferred.resolver.reject(error)
+                } else {
+                    deferred.resolver.reject(TokenError.empty)
+                }
+            })
+            return deferred.promise
         }
         
         #if Enterprise
@@ -102,6 +100,14 @@ class SignInViewModel : NSObject {
         #else
         return Promise<String>.init(error: TokenError.unsupport)
         #endif
+    }
+    
+    func shouldShowUpdateAlert() -> Bool {
+        return false
+    }
+    
+    func setiOS10AlertIsShown() {
+        userCachedStatus.iOS10AlertIsShown = true
     }
 }
 

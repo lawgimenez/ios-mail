@@ -22,9 +22,10 @@
 
 import Foundation
 import Photos
+import PromiseKit
 
 protocol ImageProcessor {
-    func process(original originalImage: UIImage)
+    func process(original originalImage: UIImage) -> Promise<Void>
     func process(asset: PHAsset)
 }
 extension ImageProcessor where Self: AttachmentProvider {
@@ -35,7 +36,7 @@ extension ImageProcessor where Self: AttachmentProvider {
         return tempFileUrl
     }
     
-    internal func process(original originalImage: UIImage) {
+    internal func process(original originalImage: UIImage) -> Promise<Void> {
         let fileName = "\(NSUUID().uuidString).PNG"
         let ext = "image/png"
         var fileData: FileData!
@@ -44,15 +45,15 @@ extension ImageProcessor where Self: AttachmentProvider {
             guard let data = originalImage.pngData(),
                 let newUrl = try? self.writeItemToTempDirectory(data, filename: fileName) else
             {
-                self.controller.error(NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError, userInfo: nil).description)
-                return
+                self.controller?.error(NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError, userInfo: nil).description)
+                return Promise()
             }
             fileData = ConcreteFileData<URL>(name: fileName, ext: ext, contents: newUrl)
         #else
             fileData = ConcreteFileData<UIImage>(name: fileName, ext: ext, contents: originalImage)
         #endif
         
-        self.controller.fileSuccessfullyImported(as: fileData)
+        return self.controller?.fileSuccessfullyImported(as: fileData) ?? Promise()
     }
     
     internal func process(asset: PHAsset) {
@@ -77,7 +78,7 @@ extension ImageProcessor where Self: AttachmentProvider {
                 
                 let fileName = asset.url.lastPathComponent
                 let fileData = ConcreteFileData<Data>(name: fileName, ext: fileName.mimeType(), contents: image_data)
-                self.controller?.fileSuccessfullyImported(as: fileData)
+                self.controller?.fileSuccessfullyImported(as: fileData).cauterize()
             })
             
         case .image:
@@ -109,11 +110,11 @@ extension ImageProcessor where Self: AttachmentProvider {
                     }
                 }
                 let fileData = ConcreteFileData<Data>(name: fileName, ext: fileName.mimeType(), contents: image_data)
-                self.controller?.fileSuccessfullyImported(as: fileData)
+                self.controller?.fileSuccessfullyImported(as: fileData).cauterize()
             }
             
         default:
-            self.controller.error(LocalString._cant_open_the_file)
+            self.controller?.error(LocalString._cant_open_the_file)
         }
     }
 }

@@ -22,7 +22,7 @@
 
 
 import Foundation
-
+import PMCommon
 import PromiseKit
 import AwaitKit
 
@@ -35,6 +35,9 @@ enum SignStatus : Int {
 }
 
  enum PGPType : Int {
+    //Do not use -1, this value will break the locker check function
+    case failed_validation = -3 // not pass FE validation
+    case failed_server_validation = -2 // not pass BE validation
     case none = 0 /// default none
     case pgp_signed = 1 /// external pgp signed only
     case pgp_encrypt_trusted_key = 2 /// external encrypted and signed with trusted key
@@ -146,7 +149,7 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
                 return UIImage(named: "internal_sign_failed")
             case .pgp_encrypted:
                 return UIImage(named: "pgp_encrypted")
-            case .none:
+            case .none, .failed_server_validation, .failed_validation:
                 return nil
             case .sent_sender_out_side,
                  .zero_access_store:
@@ -218,7 +221,9 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
                  .zero_access_store,
                  .sent_sender_server,
                  .pgp_signed_verified,
-                 .none:
+                 .none,
+                 .failed_server_validation,
+                 .failed_validation:
                 return ""
             }
         }
@@ -227,7 +232,7 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
     var sentNotes: String {
         get {
             switch self.pgpType {
-            case .none:
+            case .none, .failed_server_validation, .failed_validation:
                 return LocalString._stored_with_zero_access_encryption
             case .eo:
                 return LocalString._end_to_end_encrypted
@@ -263,7 +268,7 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
     var inboxNotes: String {
         get {
             switch self.pgpType {
-            case .none:
+            case .none, .failed_server_validation, .failed_validation:
                 return LocalString._stored_with_zero_access_encryption
             case .eo, .internal_normal: //PM --> PM (encrypted+signed)
                 return LocalString._end_to_end_encrypted_message
@@ -306,7 +311,7 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
     func lockCheck(api: APIService, contactService: ContactDataService, progress: () -> Void, complete: LockCheckComplete?) {
         progress()
         async {
-            let getEmail = UserEmailPubKeys(email: self.email, api: api).run()
+            let getEmail: Promise<KeysResponse> = api.run(route: UserEmailPubKeys(email: self.email))
             let getContact = contactService.fetch(byEmails: [self.email], context: nil)
             when(fulfilled: getEmail, getContact).done { keyRes, contacts in
                 //internal emails
@@ -326,10 +331,10 @@ public class ContactVO: NSObject, ContactPickerModelProtocol {
                     }
                 }
                 complete?(nil, -1)
-            }.catch({ (error) in
+            }.catch(policy: .allErrors) { (error) in
                 PMLog.D(error.localizedDescription)
                 complete?(nil, -1)
-            })
+            }
         }
         
     }

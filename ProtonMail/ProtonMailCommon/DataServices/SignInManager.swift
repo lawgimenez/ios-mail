@@ -23,6 +23,7 @@
 
 import Foundation
 import PMKeymaker
+import PMCommon
 
 class SignInManager: Service {
     let usersManager: UsersManager
@@ -65,7 +66,7 @@ class SignInManager: Service {
         self.auth = nil
         self.userInfo = nil
         // one time api and service
-        let service = APIService(config: usersManager.serverConfig, sessionUID: "", userID: "")
+        let service = PMAPIService(doh: usersManager.doh, sessionUID: "")
         let userService = UserDataService(check: false, api: service)
         userService.sign(in: username,
                          password: password,
@@ -85,7 +86,7 @@ class SignInManager: Service {
         self.auth = nil
         self.userInfo = nil
         // one time api and service
-        let service = APIService(config: usersManager.serverConfig, sessionUID: "", userID: "")
+        let service = PMAPIService(doh: usersManager.doh, sessionUID: "")
         let userService = UserDataService(check: false, api: service)
         userService.sign(in: username,
                          password: password,
@@ -137,7 +138,7 @@ class SignInManager: Service {
         let labelService = user.labelService
         let userDataService = user.userService
         labelService.fetchLabels()
-        userDataService.fetchUserInfo().done(on: .main) { info in
+        userDataService.fetchUserInfo(auth: auth).done(on: .main) { info in
             guard let info = info else {
                 onError(NSError.unknowError())
                 return
@@ -145,8 +146,9 @@ class SignInManager: Service {
             self.usersManager.update(auth: auth, user: info)
             
             guard info.delinquent < 3 else {
-                self.usersManager.logout(user: user, shouldAlert: false)
-                onError(NSError.init(domain: "", code: 0, localizedDescription: LocalString._general_account_disabled_non_payment))
+                _ = self.usersManager.logout(user: user, shouldShowAccountSwitchAlert: false).ensure {
+                    onError(NSError.init(domain: "", code: 0, localizedDescription: LocalString._general_account_disabled_non_payment))
+                }
                 return
             }
             

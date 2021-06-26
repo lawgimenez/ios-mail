@@ -22,63 +22,36 @@
 
 
 import Foundation
+import PMCommon
 
 public class BugDataService: Service {
-    private let apiService : API
-    init(api: API) {
+    private let apiService : APIService
+    init(api: APIService) {
         self.apiService = api
     }
     
     func reportPhishing(messageID : String, messageBody : String, completion: ((NSError?) -> Void)?) {
-        let api = ReportPhishing(msgID: messageID,
-                                 mimeType: "text/html",
-                                 body: messageBody)
-        api.call(api: self.apiService) { (task, res, hasError) in
-            completion?(res?.error)
+        let route = ReportPhishing(msgID: messageID, mimeType: "text/html", body: messageBody)
+        self.apiService.exec(route: route) { (res) in
+            completion?(res.error)
         }
     }
     
     public func reportBug(_ bug: String, username : String, email: String, completion: ((NSError?) -> Void)?) {
         let systemVersion = UIDevice.current.systemVersion;
-        let model = UIDevice.current.model
+        let model = "iOS - \(UIDevice.current.model)"
         let mainBundle = Bundle.main
         let username = username
         let useremail = email
-        let butAPI = BugReportRequest(os: model, osVersion: "\(systemVersion)", clientVersion: mainBundle.appVersion, title: "ProtonMail App bug report", desc: bug, userName: username, email: useremail)
-        
-        butAPI.call(api: self.apiService) { (task, response, hasError) -> Void in
-            completion?(response?.error)
+        let route = BugReportRequest(os: model,
+                                      osVersion: "\(systemVersion)",
+                                      clientVersion: mainBundle.appVersion,
+                                      title: "ProtonMail App bug report",
+                                      desc: bug,
+                                      userName: username,
+                                      email: useremail)
+        self.apiService.exec(route: route) { (res) in
+            completion?(res.error)
         }
-    }
-    
-    public class func debugReport(_ title: String, _ bug: String, completion: ((NSError?) -> Void)?) {
-        let userInfo = [
-            NSLocalizedDescriptionKey: "ProtonMail App bug debugging.",
-            NSLocalizedFailureReasonErrorKey: "Parser issue.",
-            NSLocalizedRecoverySuggestionErrorKey: "Parser failed.",
-            "Title": title,
-            "Value": bug
-        ]
-        
-        let errors = NSError(domain: dataServiceDomain, code: -10000000, userInfo: userInfo)
-        Analytics.shared.recordError(errors)
-    }
-    
-    
-    public class func sendingIssue(title: String,
-                                   bug: String,
-                                   status: Int,
-                                   emials: [String],
-                                   attCount: Int) {
-        let userInfo = [
-            NSLocalizedDescriptionKey: "ProtonMail App bug debugging.",
-            NSLocalizedFailureReasonErrorKey: "Parser issue.",
-            NSLocalizedRecoverySuggestionErrorKey: "Parser failed.",
-            "Title": title,
-            "Value": bug,
-        ]
-        
-        let errors = NSError(domain: dataServiceDomain, code: -10000000, userInfo: userInfo)
-        Analytics.shared.recordError(errors)
     }
 }

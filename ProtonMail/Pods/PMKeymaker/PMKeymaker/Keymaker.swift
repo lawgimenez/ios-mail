@@ -21,8 +21,11 @@
 //  along with ProtonMail.  If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
-import UIKit
 import EllipticCurveKeyPair
+
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public enum Constants {
     public static let removedMainKeyFromMemory: NSNotification.Name = .init("Keymaker" + ".removedMainKeyFromMemory")
@@ -43,7 +46,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
         self.keychain = keychain
         
         super.init()
-        
+        #if canImport(UIKit)
         if #available(iOS 13.0, *) {
             NotificationCenter.default.addObserver(self, selector: #selector(mainKeyExists),
                                                    name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -55,6 +58,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
             NotificationCenter.default.addObserver(self, selector: #selector(mainKeyExists),
                                                    name: UIApplication.didBecomeActiveNotification, object: nil)
         }
+        #endif
     }
     
     deinit {
@@ -78,8 +82,8 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
         if self.autolocker?.shouldAutolockNow() == true {
             self._mainKey = nil
         }
-        if self._mainKey == nil {
-            self._mainKey = self.provokeMainKeyObtention()
+        if self._mainKey == nil, let newKey = self.provokeMainKeyObtention() {
+            self._mainKey = newKey
         }
         return self._mainKey
     }
@@ -95,6 +99,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
         guard !self.isProtectorActive(GenericBioProtection<SUBTLE>.self),
             !self.isProtectorActive(GenericPinProtection<SUBTLE>.self) else
         {
+            NoneProtection.removeCyphertext(from: self.keychain)
             NotificationCenter.default.post(.init(name: Const.requestMainKey))
             return nil
         }
@@ -113,7 +118,11 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
         return newKey
     }
     
-    private let controlThread = DispatchQueue.global(qos: .userInteractive)
+    private let controlThread: OperationQueue = {
+        let operation = OperationQueue()
+        operation.maxConcurrentOperationCount = 1
+        return operation
+    }()
     
     public func wipeMainKey() {
         NoneProtection.removeCyphertext(from: self.keychain)
@@ -152,7 +161,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
         // we'll return to main thread explicitly here
         let isMainThread = Thread.current.isMainThread
         
-        self.controlThread.async {
+        self.controlThread.addOperation {
             guard self._mainKey == nil else {
                 isMainThread ? DispatchQueue.main.async { handler(self._mainKey) } : handler(self._mainKey)
                 return
@@ -162,7 +171,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
                 isMainThread ? DispatchQueue.main.async { handler(nil) } : handler(nil)
                 return
             }
-
+            
             do {
                 let mainKeyBytes = try protector.unlock(cypherBits: cypherBits)
                 self._mainKey = mainKeyBytes
@@ -174,8 +183,8 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
                 // it happens less if auth prompt is invoked with 1 sec delay after app gone foreground but still happens
                 // description: "Could not decrypt. Failed to get externalizedContext from LAContext"
                 if #available(iOS 13.0, *),
-                    case EllipticCurveKeyPair.Error.underlying(message: _, error: let underlyingError) = error,
-                    underlyingError.code == -2
+                   case EllipticCurveKeyPair.Error.underlying(message: _, error: let underlyingError) = error,
+                   underlyingError.code == -2
                 {
                     isMainThread
                         ? DispatchQueue.main.async { self.obtainMainKey(with: protector, handler: handler) }
@@ -194,7 +203,7 @@ public class GenericKeymaker<SUBTLE: SubtleProtocol>: NSObject {
                          completion: @escaping (Bool) -> Void)
     {
         let isMainThread = Thread.current.isMainThread
-        self.controlThread.async {
+        self.controlThread.addOperation {
             guard let mainKey = self.mainKey,
                 //swiftlint:disable unused_optional_binding
                 let _ = try? protector.lock(value: mainKey) else

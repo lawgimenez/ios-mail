@@ -26,6 +26,8 @@ import CoreData
 import PromiseKit
 import AwaitKit
 import Crypto
+import PMCommon
+
 
 //TODO::fixme import header
 extension Attachment {
@@ -33,6 +35,8 @@ extension Attachment {
     struct Attributes {
         static let entityName   = "Attachment"
         static let attachmentID = "attachmentID"
+        static let isSoftDelete = "isSoftDeleted"
+        static let message = "message"
     }
     convenience init(context: NSManagedObjectContext) {
         self.init(entity: NSEntityDescription.entity(forEntityName: Attributes.entityName, in: context)!, insertInto: context)
@@ -59,53 +63,96 @@ extension Attachment {
     var downloaded: Bool {
         return (localURL != nil) && (FileManager.default.fileExists(atPath: localURL!.path))
     }
-    
+
     // Mark : public functions
-    func encrypt(byKey key: Key, mailbox_pwd: String) -> SplitMessage? {
+    func encrypt(byKey key: Key, mailbox_pwd: String) -> (Data?, NSMutableData?)? {
         do {
             if let clearData = self.fileData {
-                return try clearData.encryptAttachment(fileName: self.fileName, pubKey: key.publicKey)
+                let splitMsg = try clearData.encryptAttachment(fileName: self.fileName, pubKey: key.publicKey)
+                return (splitMsg?.keyPacket, splitMsg?.dataPacket?.mutable)
             }
             
             guard let localURL = self.localURL,
-                let totalSize = try FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int else
-            {
+                  let totalSize = try FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int
+            else {
                 return nil
             }
             
-            let encryptor = try Data.makeEncryptAttachmentProcessor(fileName: self.fileName, totalSize: totalSize, pubKey: key.publicKey)
+            var error: NSError?
+            let key = CryptoNewKeyFromArmored(key.publicKey, &error)
+            if let err = error {
+                throw err
+            }
+            
+            let keyRing = CryptoNewKeyRing(key, &error)
+            if let err = error {
+                throw err
+            }
+            
+            // We set the buffer with some margin to be sure to hold
+            // the full data packet
+            let bufferSize = totalSize + 1000000
+            
+            // We manually allocate the buffer for the data packet
+            guard let dataBuffer = NSMutableData(length: bufferSize) else {
+                return nil
+            }
+            
+            // We create the processor with the buffer
+            guard let encryptor = try keyRing?.newManualAttachmentProcessor(totalSize, filename: self.fileName, dataBuffer: dataBuffer as Data) else {
+                return nil
+            }
+            
             let fileHandle = try FileHandle(forReadingFrom: localURL)
             
+            // We encrypt the file chunk by chunk
             let chunkSize = 1000000 // 1 mb
             var offset = 0
             while offset < totalSize {
-                autoreleasepool() {
+                try autoreleasepool {
                     let currentChunkSize = offset + chunkSize > totalSize ? totalSize - offset : chunkSize
                     let currentChunk = fileHandle.readData(ofLength: currentChunkSize)
                     offset += currentChunkSize
                     fileHandle.seek(toFileOffset: UInt64(offset))
-                    encryptor.process(currentChunk)
+                    try encryptor.process(currentChunk)
                 }
+                // Forces golang to return unused memory
+                HelperFreeOSMemory()
             }
             fileHandle.closeFile()
+            // We finalize the encryption
+            try encryptor.finish()
+            HelperFreeOSMemory()
             
-            return try encryptor.finish()
+            // We get back the key packet
+            let keyPacket = encryptor.getKeyPacket()
+            
+            // And we resize the data packet buffer to the right length
+            let dataLength = encryptor.getDataLength()
+            if dataLength > bufferSize {
+                return nil
+            } else if dataLength < bufferSize {
+                dataBuffer.length = dataLength
+            }
+            // Forces golang to return unused memory
+            defer { HelperFreeOSMemory() }
+            return (keyPacket, dataBuffer)
         } catch {
             return nil
         }
     }
     
-    func sign(byKey key: Key, userKeys: Data?, passphrase: String) -> Data? {
+    func sign(byKey key: Key, userKeys: [Data], passphrase: String) -> Data? {
         do {
             var pwd : String = passphrase
-            if let token = key.token, let signature = key.signature, let userKey = userKeys { //have both means new schema. key is
-                if let plainToken = try token.decryptMessage(binKeys: userKey, passphrase: passphrase) {
+            if let token = key.token, let signature = key.signature { //have both means new schema. key is
+                if let plainToken = try token.decryptMessage(binKeys: userKeys, passphrase: passphrase) {
                     PMLog.D(signature)
                     pwd = plainToken
                     
                 }
-            } else if let token = key.token, let userKey = userKeys { //old schema with token - subuser. key is embed singed
-                if let plainToken = try token.decryptMessage(binKeys: userKey, passphrase: passphrase) {
+            } else if let token = key.token { //old schema with token - subuser. key is embed singed
+                if let plainToken = try token.decryptMessage(binKeys: userKeys, passphrase: passphrase) {
                     //TODO:: try to verify signature here embeded signature
                     pwd = plainToken
                 }
@@ -126,7 +173,7 @@ extension Attachment {
         }
     }
     
-    func getSession(keys: Data, mailboxPassword: String) throws -> SymmetricKey? {
+    func getSession(keys: [Data], mailboxPassword: String) throws -> SymmetricKey? {
         guard let keyPacket = self.keyPacket else {
             return nil //TODO:: error throw
         }
@@ -139,7 +186,7 @@ extension Attachment {
         return sessionKey
     }
     
-    func getSession(userKey: Data, keys: [Key], mailboxPassword: String) throws -> SymmetricKey? {
+    func getSession(userKey: [Data], keys: [Key], mailboxPassword: String) throws -> SymmetricKey? {
         guard let keyPacket = self.keyPacket else {
             return nil
         }
@@ -203,7 +250,7 @@ extension Attachment {
     
     func base64DecryptAttachment(userInfo: UserInfo, passphrase: String) -> String {
 //        let userInfo = self.message.cachedUser ?? user.userInfo
-        let userPrivKeys = userInfo.userPrivateKeys
+        let userPrivKeys = userInfo.userPrivateKeysArray
         let addrPrivKeys = userInfo.addressKeys
 //        let passphrase = self.message.cachedPassphrase ?? user.mailboxPassword
 
@@ -220,7 +267,7 @@ extension Attachment {
                                                                keys: addrPrivKeys) :
                                     try data.decryptAttachment(keydata,
                                                                passphrase: passphrase,
-                                                               privKeys: addrPrivKeys.binPrivKeys) {
+                                                               privKeys: addrPrivKeys.binPrivKeysArray) {
                                 let strBase64:String = decryptData.base64EncodedString(options: .lineLength64Characters)
                                 return strBase64
                             }
@@ -241,7 +288,7 @@ extension Attachment {
                                                                keys: addrPrivKeys) :
                                     try data.decryptAttachment(keydata,
                                                                passphrase: passphrase,
-                                                               privKeys: addrPrivKeys.binPrivKeys) {
+                                                               privKeys: addrPrivKeys.binPrivKeysArray) {
                                 let strBase64:String = decryptData.base64EncodedString(options: .lineLength64Characters)
                                 return strBase64
                             }
@@ -295,7 +342,7 @@ extension Attachment {
 
 protocol AttachmentConvertible {
     var dataSize: Int { get }
-    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Attachment?
+    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Promise<Attachment?>
 }
 
 // THIS IS CALLED FOR CAMERA
@@ -306,35 +353,40 @@ extension UIImage: AttachmentConvertible {
     private func toData() -> Data! {
         return self.jpegData(compressionQuality: 0)
     }
-    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Attachment? {
-        if let fileData = self.toData() {
-            if let context = message.managedObjectContext {
-                let attachment = Attachment(context: context)
-                attachment.attachmentID = "0"
-                attachment.fileName = fileName
-                attachment.mimeType = "image/jpg"
-                attachment.fileData = stripMetadata ? fileData.strippingExif() : fileData
-                attachment.fileSize = fileData.count as NSNumber
-                attachment.isTemp = false
-                attachment.keyPacket = ""
-                attachment.localURL = nil
-            
-                attachment.message = message
+    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Promise<Attachment?> {
+        return Promise { seal in
+            guard let context = message.managedObjectContext else {
+                assert(false, "Context improperly destroyed")
+                seal.fulfill(nil)
+                return
+            }
+            CoreDataService.shared.enqueue(context: context) { (context) in
+                if let fileData = self.toData() {
+                    let attachment = Attachment(context: context)
+                    attachment.attachmentID = "0"
+                    attachment.fileName = fileName
+                    attachment.mimeType = "image/jpg"
+                    attachment.fileData = stripMetadata ? fileData.strippingExif() : fileData
+                    attachment.fileSize = fileData.count as NSNumber
+                    attachment.isTemp = false
+                    attachment.keyPacket = ""
+                    attachment.localURL = nil
                 
-                let number = message.numAttachments.int32Value
-                let newNum = number > 0 ? number + 1 : 1
-                message.numAttachments = NSNumber(value: max(newNum, Int32(message.attachments.count)))
-                
-                var error: NSError? = nil
-                error = context.saveUpstreamIfNeeded()
-                if error != nil {
-                    PMLog.D("toAttachment () with error: \(String(describing: error))")
+                    attachment.message = message
+                    
+                    let number = message.numAttachments.int32Value
+                    let newNum = number > 0 ? number + 1 : 1
+                    message.numAttachments = NSNumber(value: max(newNum, Int32(message.attachments.count)))
+                    
+                    var error: NSError? = nil
+                    error = context.saveUpstreamIfNeeded()
+                    if error != nil {
+                        PMLog.D("toAttachment () with error: \(String(describing: error))")
+                    }
+                    seal.fulfill(attachment)
                 }
-                return attachment
             }
         }
-        
-        return nil
     }
 }
 
@@ -343,70 +395,79 @@ extension Data: AttachmentConvertible {
     var dataSize: Int {
         return self.count
     }
-    func toAttachment (_ message:Message, fileName : String, stripMetadata: Bool) -> Attachment? {
+    func toAttachment (_ message:Message, fileName : String, stripMetadata: Bool) -> Promise<Attachment?> {
         return self.toAttachment(message, fileName: fileName, type: "image/jpg", stripMetadata: stripMetadata)
     }
     
-    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Attachment? {
-        guard let context = message.managedObjectContext else {
-            assert(false, "Context improperly destroyed")
-            return nil
+    func toAttachment (_ message:Message, fileName : String, type:String, stripMetadata: Bool) -> Promise<Attachment?> {
+        return Promise { seal in
+            guard let context = message.managedObjectContext else {
+                assert(false, "Context improperly destroyed")
+                seal.fulfill(nil)
+                return
+            }
+            CoreDataService.shared.enqueue(context: context) { (context) in
+                let attachment = Attachment(context: context)//TODO:: need check context nil or not instead of !
+                attachment.attachmentID = "0"
+                attachment.fileName = fileName
+                attachment.mimeType = type
+                attachment.fileData = stripMetadata ? self.strippingExif() : self
+                attachment.fileSize = self.count as NSNumber
+                attachment.isTemp = false
+                attachment.keyPacket = ""
+                attachment.localURL = nil
+                
+                attachment.message = message
+                
+                let number = message.numAttachments.int32Value
+                let newNum = number > 0 ? number + 1 : 1
+                message.numAttachments = NSNumber(value: Swift.max(newNum, Int32(message.attachments.count)))
+                
+                var error: NSError? = nil
+                error = attachment.managedObjectContext?.saveUpstreamIfNeeded()
+                if error != nil {
+                    PMLog.D(" toAttachment () with error: \(String(describing: error))")
+                }
+                seal.fulfill(attachment)
+            }
         }
-        let attachment = Attachment(context: context)//TODO:: need check context nil or not instead of !
-        attachment.attachmentID = "0"
-        attachment.fileName = fileName
-        attachment.mimeType = type
-        attachment.fileData = stripMetadata ? self.strippingExif() : self
-        attachment.fileSize = self.count as NSNumber
-        attachment.isTemp = false
-        attachment.keyPacket = ""
-        attachment.localURL = nil
-        
-        attachment.message = message
-        
-        let number = message.numAttachments.int32Value
-        let newNum = number > 0 ? number + 1 : 1
-        message.numAttachments = NSNumber(value: Swift.max(newNum, Int32(message.attachments.count)))
-        
-        var error: NSError? = nil
-        error = attachment.managedObjectContext?.saveUpstreamIfNeeded()
-        if error != nil {
-            PMLog.D(" toAttachment () with error: \(String(describing: error))")
-        }
-        return attachment
-        
     }
 }
 
 // THIS IS CALLED FROM SHARE EXTENSION
 extension URL: AttachmentConvertible {
-    func toAttachment(_ message: Message, fileName: String, type: String, stripMetadata: Bool) -> Attachment? {
-        guard let context = message.managedObjectContext else {
-            assert(false, "Context improperly destroyed")
-            return nil
+    func toAttachment(_ message: Message, fileName: String, type: String, stripMetadata: Bool) -> Promise<Attachment?> {
+        return Promise { seal in
+            guard let context = message.managedObjectContext else {
+                assert(false, "Context improperly destroyed")
+                seal.fulfill(nil)
+                return
+            }
+            CoreDataService.shared.enqueue(context: context) { (context) in
+                let attachment = Attachment(context: context)
+                attachment.attachmentID = "0"
+                attachment.fileName = fileName
+                attachment.mimeType = type
+                attachment.fileData = nil
+                attachment.fileSize = NSNumber(value: self.dataSize)
+                attachment.isTemp = false
+                attachment.keyPacket = ""
+                attachment.localURL = stripMetadata ? self.strippingExif() : self
+                
+                attachment.message = message
+                
+                let number = message.numAttachments.int32Value
+                let newNum = number > 0 ? number + 1 : 1
+                message.numAttachments = NSNumber(value: max(newNum, Int32(message.attachments.count)))
+                
+                var error: NSError? = nil
+                error = attachment.managedObjectContext?.saveUpstreamIfNeeded()
+                if error != nil {
+                    PMLog.D(" toAttachment () with error: \(String(describing: error))")
+                }
+                seal.fulfill(attachment)
+            }
         }
-        let attachment = Attachment(context: context)
-        attachment.attachmentID = "0"
-        attachment.fileName = fileName
-        attachment.mimeType = type
-        attachment.fileData = nil
-        attachment.fileSize = NSNumber(value: self.dataSize)
-        attachment.isTemp = false
-        attachment.keyPacket = ""
-        attachment.localURL = stripMetadata ? self.strippingExif() : self
-        
-        attachment.message = message
-        
-        let number = message.numAttachments.int32Value
-        let newNum = number > 0 ? number + 1 : 1
-        message.numAttachments = NSNumber(value: max(newNum, Int32(message.attachments.count)))
-        
-        var error: NSError? = nil
-        error = attachment.managedObjectContext?.saveUpstreamIfNeeded()
-        if error != nil {
-            PMLog.D(" toAttachment () with error: \(String(describing: error))")
-        }
-        return attachment
     }
     
     var dataSize: Int {

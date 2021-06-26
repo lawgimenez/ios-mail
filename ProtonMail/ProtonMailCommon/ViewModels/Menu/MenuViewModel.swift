@@ -23,6 +23,7 @@
 
 import Foundation
 import CoreData
+import PromiseKit
 
 enum MenuSection {
     case inboxes    //general inbox list
@@ -48,7 +49,7 @@ protocol MenuViewModel : AnyObject {
     
     
     func updateMenuItems()
-    func setupLabels(delegate: NSFetchedResultsControllerDelegate?)
+    func setupLabels(delegate: NSFetchedResultsControllerDelegate?, shouldFetchLabels: Bool)
     func sectionCount() -> Int
     func section(at: Int) -> MenuSection
     
@@ -56,7 +57,7 @@ protocol MenuViewModel : AnyObject {
     func othersCount() -> Int
     func labelsCount() -> Int
     func label(at : Int) -> Label?
-    func count(by labelID: String, userID: String?) -> Int
+    func count(by labelID: String, userID: String?) -> Promise<Int>
     func user(at : Int) -> UserManager?
     func disconnectedUser(at: Int) -> UsersManager.DisconnectedUserHandle?
     var currentUser: UserManager? { get set }
@@ -70,5 +71,5 @@ protocol MenuViewModel : AnyObject {
     func isCurrentUserHasQueuedMessage() -> Bool
     func removeAllQueuedMessageOfCurrentUser()
     
-    func signOut()
+    func signOut() -> Promise<Void>
 }

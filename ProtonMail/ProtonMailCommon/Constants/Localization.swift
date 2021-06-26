@@ -138,6 +138,10 @@ class LocalizedString {
     lazy var _menu_lockapp_title  =  NSLocalizedString("Lock The App", comment: "menu title")
     /// "Subscription"
     lazy var _menu_service_plan_title  =  NSLocalizedString("Subscription", comment: "menu title")
+    /// "Manage accounts"
+    lazy var _menu_manage_accounts  =  NSLocalizedString("Manage accounts", comment: "menu title")
+    /// "Add accounts"
+    lazy var _menu_add_account  =  NSLocalizedString("Add accounts", comment: "menu title")
 
 
     // Mark Message localtion
@@ -461,6 +465,10 @@ class LocalizedString {
     lazy var _general_done_button     = NSLocalizedString("Done", comment: "Done action")
     /// "Cancel"
     lazy var _general_cancel_button   = NSLocalizedString("Cancel", comment: "Cancel action")
+    
+    lazy var _general_yes_action = NSLocalizedString("Yes", comment: "Yes action")
+    /// "Open"
+    lazy var _general_open_button     = NSLocalizedString("Open", comment: "Open action")
     /// "Remove"
     lazy var _general_remove_button   = NSLocalizedString("Remove", comment: "remove action")
     /// "Apply"
@@ -488,7 +496,7 @@ class LocalizedString {
     /// "Update"
     lazy var _general_update_action   = NSLocalizedString("Update", comment: "like top right action text")
     /// "Invalid access token. Please try loging in again."
-    lazy var _general_invalid_access_token = NSLocalizedString("Invalid access token. Please relogin.", comment: "Description")
+    lazy var _general_invalid_access_token = NSLocalizedString("Your session has expired because you have been inactive for a while or because it has been revoked. Please log back in.", comment: "Description")
     /// "A new version of ProtonMail app is available. Please update to the latest version."
     lazy var _general_force_upgrade_desc = NSLocalizedString("A new version of ProtonMail app is available. Please update to the latest version.", comment: "Description")
     /// "Search"
@@ -536,7 +544,13 @@ class LocalizedString {
     lazy var _general_edit_action = NSLocalizedString("Edit", comment: "Action")
     /// "Create"
     lazy var _general_create_action = NSLocalizedString("Create", comment: "top right action text")
-
+    
+    lazy var _general_ignore_action = NSLocalizedString("Ignore", comment: "Alarm action")
+    
+    /// "iOS 10 update error title"
+    lazy var _ios10_update_title = NSLocalizedString("OS compatibility", comment: "The title of the iOS 10 upgrate alert")
+    /// "iOS 10 update error body"
+    lazy var _ios10_update_body = NSLocalizedString("We will soon stop the support for iOS 10 devices. Please update your device's operating system to continue receiving updates in the future.", comment: "The body of the iOS 10 upgrate alert")
 
 
     /// Mark Error
@@ -671,6 +685,8 @@ class LocalizedString {
 
     /// "This preference will fallback to Safari if the browser of choice will be uninstalled."
     lazy var _settings_browser_disclaimer = NSLocalizedString("This preference will fallback to Safari if the browser of choice will be uninstalled.", comment: "Title")
+    
+    lazy var _unsupported_url = NSLocalizedString("The URL you are trying to access is not standard and may not load properly. Do you want to open it using your device's default browser?", comment: "Unsupported url alert message")
     
     /// "Auto Lock Time"
     lazy var _settings_auto_lock_time = NSLocalizedString("Auto Lock Time", comment: "Title")
@@ -1036,6 +1052,12 @@ class LocalizedString {
     lazy var _unlock_required = NSLocalizedString("Unlock required", comment: "Alert when user enabled FaceID in app settings but restricted the use of FaceID in device settings")
     
     lazy var _enable_faceid_in_settings = NSLocalizedString("You disabled FaceID in your system settings. FaceID has been used to protect important account information. To access your account, go to settings and reactivate FaceID, or log back in.", comment: "Alert when user enabled FaceID in app settings but restricted the use of FaceID in device settings")
+    
+    lazy var _lock_faceID_desc = NSLocalizedString("Turn this feature on to auto-lock your app and use a PIN code or FaceID to unlock it.", comment: "A description string in pin & faceID setting page")
+    
+    lazy var _lock_touchID_desc = NSLocalizedString("Turn this feature on to auto-lock your app and use a PIN code or fingerprint to unlock it.", comment: "A description string in pin & faceID setting page")
+    
+    lazy var _lock_wipe_desc = NSLocalizedString("All protection settings will be reset and wiped upon logging out of the app.", comment: "A description string in pin & faceID setting page")
 
     lazy var _go_to_settings = NSLocalizedString("Go to settings", comment: "Alert when user enabled FaceID in app settings but restricted the use of FaceID in device settings")
     
@@ -1081,6 +1103,8 @@ class LocalizedString {
 
     /// "Storage Warning"
     lazy var _space_warning = NSLocalizedString("Storage Warning", comment: "Title")
+    lazy var _space_all_used_warning = NSLocalizedString("You have used up all of your storage space (%@).", comment: "Content of space warning")
+    lazy var _space_partial_used_warning = NSLocalizedString("You have used %d%% of your storage space (%@).", comment: "Content of space warning")
 
     /// "Warning"
     lazy var _warning = NSLocalizedString("Warning", comment: "Title")
@@ -1099,6 +1123,8 @@ class LocalizedString {
 
     /// "Invalid hashed password!"
     lazy var _invalid_hashed_password = NSLocalizedString("Invalid hashed password!", comment: "update password error")
+    
+    lazy var _password_needs_at_least_8_chars = NSLocalizedString("The new password needs to be at least 8 characters long", comment: "update password error")
 
     /// "Can't create a SRP verifier!"
     lazy var _cant_create_a_srp_verifier = NSLocalizedString("Can't create a SRP verifier!", comment: "update password error")
@@ -1579,6 +1605,8 @@ class LocalizedString {
 
 
     // Mark: - IAP
+    
+    lazy var _iap_unavailable = NSLocalizedString("Subscription information temporarily unavailable. Please try again later.", comment: "Fetch subscription data failed")
 
     lazy var _unlimited_messages_sent = NSLocalizedString("Unlimited messages sent/day", comment: "Service plan capability;")
 
@@ -1640,27 +1668,6 @@ class LocalizedString {
     
     lazy var _vis_header = NSLocalizedString("For power users and groups of people that value full anonymity and privacy", comment: "Service Plan description")
 
-    lazy var _unavailable_product = NSLocalizedString("Failed to get list of available products from AppStore.", comment: "Error message")
-    
-    lazy var _backend_mismatch = NSLocalizedString("It wasn't possible to match your purchased App Store product to any products on our server. Please fill in the bug report and our customer support team will contact you.", comment: "Error message")
-    
-    lazy var _sandbox_receipt = NSLocalizedString("Sorry, we cannot process purchases in the beta version of the iOS app. Thank you for participating in our public beta!", comment: "Error message for beta users")
-    
-    
-    lazy var _reciept_lost = NSLocalizedString("Apple informed us you've upgraded the service plan, but some technical data was missing. Please fill in the bug report and our customer support team will contact you.", comment: "Error message")
-    
-    lazy var _another_user_transaction = NSLocalizedString("Apple informed us you've upgraded the service plan, but we detected you have logged out of the account since then." , comment: "Error message")
-    
-    lazy var _no_hashed_username_arrived_in_transaction = NSLocalizedString("Apple informed us you've upgraded the service plan, but did not say which of your ProtonMail accounts to upgrade in case you have more than one.", comment: "Error message")
-    
-    lazy var _no_active_username_in_user_data_service = NSLocalizedString("Please log in to the ProtonMail account you're upgrading the service plan for so we can complete the purchase.", comment: "Error message")
-    
-    lazy var _transaction_failed_by_unknown_reason = NSLocalizedString("Apple informed us they could not process the purchase.", comment: "Error message")
-    
-    lazy var _no_new_subscription_in_response = NSLocalizedString("We have successfully activated your subscription. Please relaunch the app to start using your new service plan.", comment: "Error message")
-    
-    lazy var _do_you_want_to_bypass_validation = NSLocalizedString("Do you want to activate the purchased service plan for ", comment: "Question is user wants to bypass username validation and activate plan for current username")
-    
     lazy var _yes_bypass_validation = NSLocalizedString("Yes, activate it for ", comment: "Warning message option to bypass validation and activate plan for current username")
     
     lazy var _no_dont_bypass_validation = NSLocalizedString("No, for another ProtonMail account", comment: "Warning message option when user want to relogin to another account")
@@ -1672,11 +1679,6 @@ class LocalizedString {
     lazy var _iap_bugreport_yes = NSLocalizedString("Yes, attach details of payment", comment: "Error message")
     
     lazy var _iap_bugreport_no = NSLocalizedString("No, not related to in-app purchase", comment: "Error message")
-
-    lazy var _unlock_to_proceed_with_iap = NSLocalizedString("Please unlock the app to proceed with your service plan activation", comment: "Error message")
-
-    lazy var _please_sign_in_iap = NSLocalizedString("Please log in to the ProtonMail account you're upgrading the service plan for so we can complete the service plan activation.", comment: "Error message")
-
 
     // Mark : Force Upgrade
 
@@ -1765,6 +1767,7 @@ class LocalizedString {
     /// Logout
     lazy var _logout_title = NSLocalizedString("Logout", comment: "Alert title to confirm logout")
     lazy var _logout_confirmation = NSLocalizedString("You will be switched to %@", comment: "Alert to confirm logout")
+    lazy var _logout_confirmation_in_bio = NSLocalizedString("Are you sure you want to logout?", comment: "Alert to confirm logout")
     lazy var _logout_confirmation_one_account = NSLocalizedString("Are you sure you want to logout %@?", comment: "Alert to confirm logout when only one account logged in")
     lazy var _logout_confirmation_having_pending_message = NSLocalizedString("There are unsent messages that will be lost if you log out", comment: "Alert to confirm logout with pending message in the queue")
     
@@ -1896,4 +1899,21 @@ class LocalizedString {
     
     lazy var _pin_and_face_id = NSLocalizedString("PIN & FaceID", comment: "device settings auto lock type title")
     lazy var _enable_pin_or_face_id = NSLocalizedString("Enable PIN/FaceID", comment: "device settings auto lock type title toggle text")
+    lazy var _recipient_not_found = NSLocalizedString("Recipient not found", comment: "The error message is shown in composer")
+    lazy var _signle_address_invalid_error_content = NSLocalizedString("Email address is invalid", comment: "The error message is shown in composer")
+    lazy var _address_invalid_error_content = NSLocalizedString("At least one recipient email address is improperly formatted, please double check them.", comment: "incorrect email format error in composer")
+    lazy var _address_invalid_error_title = NSLocalizedString("Error sending", comment: "incorrect email format error in composer")
+    
+    lazy var _address_in_group_not_found_error = NSLocalizedString("At least one email address in the group could not be found", comment: "incorrect email format error while sending")
+    lazy var _address_invalid_error_sending = NSLocalizedString("At least one recipient email address/domain doesn't exist or is badly formatted. Message moved to drafts.", comment: "incorrect email format error while sending")
+    lazy var _address_invalid_error_sending_title = NSLocalizedString("Sending failed", comment: "title of incorrect email format error while sending")
+    lazy var _address_invalid_error_to_draft_action_title = NSLocalizedString("Go to drafts", comment: "title of alert acton of incorrect email format error")
+    
+    lazy var _mailbox_draft_is_uploading = NSLocalizedString("Draft is still uploading...", comment: "title of toast message that user taps the message which is uploading")
+    lazy var _mailbox_draft_is_sending = NSLocalizedString("Sending message...", comment: "content of the sending mesage that will display this text on the date label")
+    lazy var _messages_validation_failed_try_again = NSLocalizedString("Message could not be sent. At least one recipient email address/domain doesn't exist or is badly formatted.", comment: "message shown in the notification when the recipient validation is failed while sending")
+    lazy var _ignore_IAP_error_descrption = NSLocalizedString("Only ignore the purchase activation if you are sure that all your subscriptions are up to date. For further assistance, please contact customer support. \r\n\r\n Are you sure you want to ignore the activation?", comment: "Alert message")
+
+    lazy var _message_of_unavailable_to_upgrade_account = NSLocalizedString("It's not possible to swicth to another plan within the app. %1$@", comment: "")
+    lazy var _message_of_unavailable_to_upgrade_url = NSLocalizedString("Plans can be edited on the web version.", comment: "")
 }

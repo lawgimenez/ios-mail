@@ -37,54 +37,23 @@ struct Constants {
         static let SpaceWarningThresholdDouble: Double = 80
         static let SplashVersion : Int                 = 1
         static let TourVersion : Int                   = 2
-
+        
         static let AskTouchID : Int              = 1
         static var AppVersion : Int              = 1
         
-//               //
-//         //
-         static let URL_Protocol : String = "https://"
-//         //static let URL_Protocol : String = "http://"
+        // live api
+        static let URL_HOST : String = "api.protonmail.ch"
+        static let API_PATH : String = ""
+        //static let URL_HOST : String = "beta.proton.black"
+        //static let API_PATH : String = "/api"
+        static let DOH_ENABLE : Bool = true
         
-//         //live api
-         static let URL_HOST : String = "api.protonmail.ch"
-         static let API_PATH : String = ""
-        
-//         ///
-         static let rediectURL = "https://protonmail.ch"
-        
-//         //blue test
-//         //static let URL_HOST : String = "protonmail.blue"
-//         //static let API_PATH : String = "/api"
-//         //static let URL_HOST : String = "midnight.protonmail.blue"
-        
-//         //live test api
-//         //static let URL_HOST : String = "test-api.protonmail.ch"
-        
-//         //live dev api
-//         //static let URL_HOST : String = "dev-api.protonmail.ch"
-//         //    static let URL_HOST : String = "dev.protonmail.com"
-        
-        
-//         //static let URL_HOST : String = "http://127.0.0.1"  //http
-//         //static let URL_HOST : String = "http://protonmail.xyz"  //http
-        
-//         //api options
-//         //static let API_PATH : String = "/api"
-        
-         static var API_HOST_URL : String {
-               get {
-                   return URL_Protocol + URL_HOST
-               }
-           }
-
-        static var DEBUG_OPTION : String {
+        ///
+        static let URL_Protocol : String = "https://"
+        static let API_PREFIXED: String = "mail/v4"
+        static var API_HOST_URL : String {
             get {
-                #if DEBUG
-                return "" //"?XDEBUG_SESSION_START=\(18073)"
-                #else
-                return ""
-                #endif
+                return URL_Protocol + URL_HOST
             }
         }
         

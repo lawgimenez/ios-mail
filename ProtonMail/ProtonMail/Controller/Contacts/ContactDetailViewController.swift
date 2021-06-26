@@ -79,6 +79,7 @@ class ContactDetailViewController: ProtonMailViewController, ViewModelProtocol {
                                         style: UIBarButtonItem.Style.plain,
                                         target: self, action: #selector(didTapEditButton(sender:)))
         self.navigationItem.rightBarButtonItem = doneItem
+        self.navigationItem.assignNavItemIndentifiers()
         self.configHeaderStyle()
         
         viewModel.getDetails {
@@ -101,10 +102,8 @@ class ContactDetailViewController: ProtonMailViewController, ViewModelProtocol {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 60.0
         tableView.noSeparatorsBelowFooter()
-        
-        if #available(iOS 11.0, *) {
-            self.navigationItem.largeTitleDisplayMode = .never
-        }
+
+        navigationItem.largeTitleDisplayMode = .never
     }
     
     /// config header style only need once
@@ -220,7 +219,11 @@ class ContactDetailViewController: ProtonMailViewController, ViewModelProtocol {
         if let phoneCallURL = URL(string: phoneUrl) {
             let application:UIApplication = UIApplication.shared
             if (application.canOpenURL(phoneCallURL)) {
-                application.openURL(phoneCallURL)
+                if #available(iOS 10.0, *) {
+                    application.open(phoneCallURL, options: [:], completionHandler: nil)
+                } else {
+                    application.openURL(phoneCallURL)
+                }
             }
         }
     }
@@ -282,7 +285,8 @@ class ContactDetailViewController: ProtonMailViewController, ViewModelProtocol {
             let user = self.viewModel.user
             let viewModel = ContainableComposeViewModel(msg: nil, action: .newDraft,
                                                         msgService: user.messageService,
-                                                        user: user)
+                                                        user: user,
+                                                        coreDataService: self.viewModel.coreDataService)
             if let contact = sender as? ContactVO {
                 viewModel.addToContacts(contact)
             }
@@ -603,7 +607,11 @@ extension ContactDetailViewController: UITableViewDelegate {
                 let fullUrl = "http://maps.apple.com/?q=\(fulladdr)"
                 if let strUrl = fullUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                     let url = URL(string: strUrl) {
-                    UIApplication.shared.openURL(url)
+                    if #available(iOS 10.0, *) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                    } else {
+                        UIApplication.shared.openURL(url)
+                    }
                 }
             }
         case .url:
@@ -618,7 +626,11 @@ extension ContactDetailViewController: UITableViewDelegate {
                 if let validUrl = comps.url {
                     let application:UIApplication = UIApplication.shared
                     if (application.canOpenURL(validUrl)) {
-                        application.openURL(validUrl)
+                        if #available(iOS 10.0, *) {
+                            application.open(validUrl, options: [:], completionHandler: nil)
+                        } else {
+                            application.openURL(validUrl)
+                        }
                         break
                     }
                 }
@@ -657,10 +669,8 @@ extension ContactDetailViewController: UITableViewDelegate {
                                                              .postToVimeo,
                                                              .postToTencentWeibo,
                                                              .assignToContact]
-            if #available(iOS 11.0, *) {
-                activityViewController.excludedActivityTypes?.append(.markupAsPDF)
-                activityViewController.excludedActivityTypes?.append(.openInIBooks)
-            }
+            activityViewController.excludedActivityTypes?.append(.markupAsPDF)
+            activityViewController.excludedActivityTypes?.append(.openInIBooks)
             self.present(activityViewController, animated: true, completion: nil)
         }
     }

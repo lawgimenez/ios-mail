@@ -25,6 +25,7 @@ import Foundation
 import PromiseKit
 import AwaitKit
 import Crypto
+import PMCommon
 
 extension Data {
     var html2AttributedString: NSAttributedString? {
@@ -53,13 +54,13 @@ extension String {
 final class PreContact {
     let email : String
     let firstPgpKey : Data?
-    let pgpKeys : Data?
+    let pgpKeys : [Data]
     let sign : Bool
     let encrypt : Bool
     let mime : Bool
     let plainText : Bool
     
-    init(email: String, pubKey: Data?, pubKeys: Data?, sign : Bool, encrypt: Bool, mime : Bool, plainText : Bool) {
+    init(email: String, pubKey: Data?, pubKeys: [Data], sign : Bool, encrypt: Bool, mime : Bool, plainText : Bool) {
         self.email = email
         self.firstPgpKey = pubKey
         self.pgpKeys = pubKeys
@@ -294,7 +295,6 @@ class SendBuilder {
                                                             customAuthCredential: att.message.cachedAuthCredential,
                                                             downloadTask: { (taskOne : URLSessionDownloadTask) -> Void in },
                                                             completion: { (_, url, error) -> Void in
-                                                                att.localURL = url;
                                                                 seal.fulfill(att.base64DecryptAttachment(userInfo: userInfo, passphrase: passphrase))
                                                                 if error != nil {
                                                                     PMLog.D("\(String(describing: error))")
@@ -303,7 +303,7 @@ class SendBuilder {
         }
     }
     
-    func buildMime(senderKey: Key, passphrase: String, userKeys: Data, keys: [Key], newSchema: Bool, msgService: MessageDataService, userInfo: UserInfo) -> Promise<SendBuilder> {
+    func buildMime(senderKey: Key, passphrase: String, userKeys: [Data], keys: [Key], newSchema: Bool, msgService: MessageDataService, userInfo: UserInfo) -> Promise<SendBuilder> {
         return Promise { seal in
             /// decrypt attachments
             var messageBody = self.clearBody ?? ""
@@ -319,7 +319,7 @@ class SendBuilder {
                 //ignore
             }
             
-            let typeMessage = "Content-Type: multipart/mixed; boundary=\"\(boundaryMsg)\""
+            let typeMessage = "Content-Type: multipart/related; boundary=\"\(boundaryMsg)\""
             signbody.append(contentsOf: typeMessage + "\r\n")
             signbody.append(contentsOf: "\r\n")
             signbody.append(contentsOf: "--\(boundaryMsg)" + "\r\n")
@@ -349,6 +349,9 @@ class SendBuilder {
                         signbody.append(contentsOf: "Content-Type: \(att.mimeType); name=\"\(attName)\"" + "\r\n")
                         signbody.append(contentsOf: "Content-Transfer-Encoding: base64" + "\r\n")
                         signbody.append(contentsOf: "Content-Disposition: attachment; filename=\"\(attName)\"" + "\r\n")
+                        let contentID = att.contentID() ?? ""
+                        signbody.append(contentsOf: "Content-ID: <\(contentID)>\r\n")
+
                         signbody.append(contentsOf: "\r\n")
                         signbody.append(contentsOf: value + "\r\n")
                     case .rejected(let error):
@@ -371,14 +374,14 @@ class SendBuilder {
                 //TODO:: fix the ?
                 
                 seal.fulfill(self)
-            }.catch({ error in
+            }.catch(policy: .allErrors) { error in
                 seal.reject(error)
-            })
+            }
         }
     }
     
     
-    func buildPlainText(senderKey: Key, passphrase: String, userKeys: Data, keys: [Key], newSchema: Bool) -> Promise<SendBuilder> {
+    func buildPlainText(senderKey: Key, passphrase: String, userKeys: [Data], keys: [Key], newSchema: Bool) -> Promise<SendBuilder> {
         return Promise { seal in
             async {
                 //TODO:: fix all ?
@@ -555,13 +558,12 @@ class EOAddressBuilder : PackageBuilder {
             let based64Token = token.encodeBase64() as String
             let encryptedToken = try based64Token.encrypt(withPwd: self.password) ?? ""
             
-            
             //start build auth package
-            let authModuls = try AuthModulusRequest(authCredential: nil).syncCall(api: APIService.shared) // will use standard auth credential
-            guard let moduls_id = authModuls?.ModulusID else {
+            let authModuls: AuthModulusResponse = try await(PMAPIService.shared.run(route: AuthModulusRequest(authCredential: nil)))// will use standard auth credential
+            guard let moduls_id = authModuls.ModulusID else {
                 throw UpdatePasswordError.invalidModulusID.error
             }
-            guard let new_moduls = authModuls?.Modulus else {
+            guard let new_moduls = authModuls.Modulus else {
                 throw UpdatePasswordError.invalidModulus.error
             }
             

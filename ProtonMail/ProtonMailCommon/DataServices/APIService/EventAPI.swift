@@ -22,45 +22,48 @@
 
 
 import Foundation
+import PMCommon
 
+
+//Events API
+//Doc: https://github.com/ProtonMail/Slim-API/blob/develop/api-spec/pm_api_events_v3.md
+struct EventAPI {
+    /// base event api path
+    static let path :String = "/events"
     
-// MARK : Get messages part
-final class EventCheckRequest: ApiRequest<EventCheckResponse>{
+    /// get latest event id
+    static let v_get_latest_event_id : Int = 3
+    
+    /// get updated events based on latest event id
+    static let v_get_events : Int = 3
+    
+}
+    
+// MARK : Get messages part -- EventCheckResponse
+final class EventCheckRequest: Request {
     let eventID : String
     
     init(eventID : String) {
         self.eventID = eventID
     }
     
-    override func path() -> String {
-        return EventAPI.path + "/\(self.eventID)" + Constants.App.DEBUG_OPTION
-    }
-    
-    override func apiVersion() -> Int {
-        return EventAPI.v_get_events
+    var path: String {
+        return EventAPI.path + "/\(self.eventID)"
     }
 }
 
-
-final class EventLatestIDRequest<T : ApiResponse> : ApiRequest<T>{
-
-    override func path() -> String {
-        return EventAPI.path + "/latest" + Constants.App.DEBUG_OPTION
-    }
-    
-    override func apiVersion() -> Int {
-        return EventAPI.v_get_latest_event_id
+// -- EventLatestIDResponse
+final class EventLatestIDRequest : Request{
+    var path: String {
+        return EventAPI.path + "/latest"
     }
 }
 
-final class EventLatestIDResponse : ApiResponse {
+final class EventLatestIDResponse : Response {
     var eventID : String = ""
-
     override func ParseResponse(_ response: [String : Any]!) -> Bool {
-        
         PMLog.D(response.json(prettyPrinted: true))
         self.eventID = response["EventID"] as? String ?? ""
-
         return true
     }
 }
@@ -68,13 +71,13 @@ final class EventLatestIDResponse : ApiResponse {
 struct RefreshStatus : OptionSet {
     let rawValue: Int
     //255 means throw out client cache and reload everything from server, 1 is mail, 2 is contacts
-    static let ok       = RefreshStatus(rawValue: 0)
+    static let ok       = RefreshStatus([])
     static let mail     = RefreshStatus(rawValue: 1 << 0)
     static let contacts = RefreshStatus(rawValue: 1 << 1)
     static let all      = RefreshStatus(rawValue: 0xFF)
 }
 
-final class EventCheckResponse : ApiResponse {
+final class EventCheckResponse : Response {
     var eventID : String = ""
     var refresh : RefreshStatus = .ok
     var more : Int = 0
@@ -171,9 +174,9 @@ final class MessageEvent {
     var ID : String!
     var message : [String : Any]?
     init(event: [String : Any]) {
-        self.Action = event["Action"] as! Int
+        self.Action = (event["Action"] as! Int)
         self.message =  event["Message"] as? [String : Any]
-        self.ID =  event["ID"] as! String
+        self.ID =  (event["ID"] as! String)
         self.message?["ID"] = self.ID
         self.message?["needsUpdate"] = false
     }
@@ -196,7 +199,7 @@ final class ContactEvent {
         let actionInt = event["Action"] as? Int ?? 255
         self.action = UpdateType(rawValue: actionInt) ?? .unknown
         self.contact =  event["Contact"] as? [String : Any]
-        self.ID =  event["ID"] as! String
+        self.ID =  (event["ID"] as! String)
         
         guard let contact = self.contact else {
             return
@@ -250,9 +253,9 @@ final class LabelEvent {
     var label : [String : Any]?
     
     init(event: [String : Any]!) {
-        self.Action = event["Action"] as! Int
+        self.Action = (event["Action"] as! Int)
         self.label =  event["Label"] as? [String : Any]
-        self.ID =  event["ID"] as! String
+        self.ID =  (event["ID"] as! String)
     }
 }
 

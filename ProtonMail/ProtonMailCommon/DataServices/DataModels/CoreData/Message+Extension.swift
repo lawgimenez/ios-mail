@@ -24,6 +24,7 @@
 import Foundation
 import CoreData
 import Crypto
+import PMCommon
 
 extension Message {
     
@@ -45,6 +46,9 @@ extension Message {
         
         // 1.12.0
         static let userID = "userID"
+        
+        // 1.12.9
+        static let isSending = "isSending"
     }
     
     // MARK: - variables
@@ -167,7 +171,7 @@ extension Message {
                 }
                 
                 if !label.labelID.preg_match ("(?!^\\d+$)^.+$") {
-                    if label.labelID != "1", label.labelID != "2", label.labelID != "10" {
+                    if label.labelID != "1", label.labelID != "2", label.labelID != "10", label.labelID != "5" {
                         return label.labelID
                     }
                 }
@@ -211,6 +215,37 @@ extension Message {
         return outLabel
     }
     
+    func checkLabels() {
+        guard let labels = self.labels.allObjects as? [Label] else {return}
+        let labelIDs = labels.map {$0.labelID}
+        guard labelIDs.contains(Message.Location.draft.rawValue) else {
+            return
+        }
+        
+        // This is the basic labes for draft
+        let basic = [Message.Location.draft.rawValue,
+                     Message.Location.allmail.rawValue,
+                     Message.HidenLocation.draft.rawValue]
+        for label in labels {
+            let id = label.labelID
+            if basic.contains(id) {continue}
+            
+            if let _ = Int(id) {
+                // default folder
+                // The draft can't in the draft folder and another folder at the same time
+                // the draft folder label should be removed
+                self.remove(labelID: Message.Location.draft.rawValue)
+                break
+            }
+            
+            // In v3 api, exclusive == true means folder
+            guard label.exclusive else {continue}
+            
+            self.remove(labelID: Message.Location.draft.rawValue)
+            break
+        }
+    }
+    
     
     func selfSent(labelID: String) -> String? {
         if let _ = self.managedObjectContext {
@@ -245,11 +280,11 @@ extension Message {
                 return Message.Location.trash.title
             }
             
-            if contains(label: .trash) {
+            if contains(label: .spam) {
                 return Message.Location.spam.title
             }
             
-            if contains(label: .trash) {
+            if contains(label: .archive) {
                 return Message.Location.archive.title
             }
             lableOnly = true
@@ -292,28 +327,31 @@ extension Message {
         return false
     }
     
-    class func delete(labelID : String) -> Bool {
+    class func delete(labelID : String) -> Bool { //TODO:: double check if user id matters
+        var result = false
         let mContext = CoreDataService.shared.mainManagedObjectContext
         let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: Message.Attributes.entityName)
         
         fetchRequest.predicate = NSPredicate(format: "(ANY labels.labelID = %@)", "\(labelID)")
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: Message.Attributes.time, ascending: false)]
-        do {
-            if let oldMessages = try mContext.fetch(fetchRequest) as? [Message] {
-                for message in oldMessages {
-                    mContext.delete(message)
+        mContext.performAndWait {
+            do {
+                if let oldMessages = try mContext.fetch(fetchRequest) as? [Message] {
+                    for message in oldMessages {
+                        mContext.delete(message)
+                    }
+                    if let error = mContext.saveUpstreamIfNeeded() {
+                        PMLog.D(" error: \(error)")
+                    } else {
+                        result = true
+                    }
                 }
-                if let error = mContext.saveUpstreamIfNeeded() {
-                    PMLog.D(" error: \(error)")
-                } else {
-                    return true
-                }
+            } catch {
+                PMLog.D(" error: \(error)")
             }
-        } catch {
-            PMLog.D(" error: \(error)")
         }
         
-        return false
+        return result
     }
     
     
@@ -324,7 +362,7 @@ extension Message {
      */
     class func deleteMessage(_ messageID : String) {
         let context = CoreDataService.shared.mainManagedObjectContext
-        context.performAndWait {
+        CoreDataService.shared.enqueue(context: context) { (context) in
             if let message = Message.messageForMessageID(messageID, inManagedObjectContext: context) {
                 let labelObjs = message.mutableSetValue(forKey: Attributes.labels)
                 labelObjs.removeAllObjects()
@@ -345,6 +383,10 @@ extension Message {
         return context.managedObjectsWithEntityName(Attributes.entityName, forManagedObjectIDs: objectIDs, error: error) as? [Message]
     }
     
+    class func getIDsofSendingMessage(managedObjectContext: NSManagedObjectContext) -> [String]? {
+        return (managedObjectContext.managedObjectsWithEntityName(Attributes.entityName, forKey: Attributes.isSending, matchingValue: NSNumber(value: true)) as? [Message])?.compactMap{ $0.messageID }
+    }
+    
     override public func awakeFromInsert() {
         super.awakeFromInsert()
         
@@ -358,28 +400,49 @@ extension Message {
     
     func decryptBody(keys: [Key], passphrase: String) throws -> String? {
         var firstError : Error?
+        var errorMessages: [String] = []
         for key in keys {
             do {
                 return try body.decryptMessageWithSinglKey(key.private_key, passphrase: passphrase)
             } catch let error {
                 if firstError == nil {
                     firstError = error
+                    errorMessages.append(error.localizedDescription)
                 }
                 PMLog.D(error.localizedDescription)
             }
         }
         
+        let users = sharedServices.get(by: UsersManager.self)
+        let user = users.firstUser
+        let extra: [String: Any] = ["newSchema": false,
+                                    "Ks count": keys.count,
+                                    "Error message": errorMessages]
+        
         if let error = firstError {
+            Analytics.shared.error(message: .decryptedMessageBodyFailed,
+                                   error: error,
+                                   extra: extra,
+                                   user: user)
             throw error
         }
+        Analytics.shared.error(message: .decryptedMessageBodyFailed,
+                               error: "No error from crypto library",
+                               extra: extra,
+                               user: user)
         return nil
     }
     
-    func decryptBody(keys: [Key], userKeys: Data, passphrase: String) throws -> String? {
+    func decryptBody(keys: [Key], userKeys: [Data], passphrase: String) throws -> String? {
         var firstError : Error?
+        var errorMessages: [String] = []
+        var newScheme: Int = 0
+        var oldSchemaWithToken: Int = 0
+        var oldSchema: Int = 0
         for key in keys {
             do {
                 if let token = key.token, let signature = key.signature { //have both means new schema. key is
+                    newScheme += 1
                     if let plaitToken = try token.decryptMessage(binKeys: userKeys, passphrase: passphrase) {
                         //TODO:: try to verify signature here Detached signature
                         // if failed return a warning
@@ -387,24 +450,45 @@ extension Message {
                         return try body.decryptMessageWithSinglKey(key.private_key, passphrase: plaitToken)
                     }
                 } else if let token = key.token { //old schema with token - subuser. key is embed singed
+                    oldSchemaWithToken += 1
                     if let plaitToken = try token.decryptMessage(binKeys: userKeys, passphrase: passphrase) {
                         //TODO:: try to verify signature here embeded signature
                         return try body.decryptMessageWithSinglKey(key.private_key, passphrase: plaitToken)
                     }
                 } else {//normal key old schema
-                    return try body.decryptMessage(binKeys: keys.binPrivKeys, passphrase: passphrase)
+                    oldSchema += 1
+                    return try body.decryptMessage(binKeys: keys.binPrivKeysArray, passphrase: passphrase)
                 }
             } catch let error {
                 if firstError == nil {
                     firstError = error
+                    errorMessages.append(error.localizedDescription)
                 }
                 PMLog.D(error.localizedDescription)
             }
         }
         
+        let users = sharedServices.get(by: UsersManager.self)
+        let user = users.firstUser
+        let extra: [String: Any] = ["newSchema": true,
+                                    "Ks count": keys.count,
+                                    "UKs count": userKeys.count,
+                                    "newScheme Ks": newScheme,
+                                    "oldSchemaWithT Ks": oldSchemaWithToken,
+                                    "oldSchema Ks": oldSchema,
+                                    "Error message": errorMessages]
+        
         if let error = firstError {
+            Analytics.shared.error(message: .decryptedMessageBodyFailed,
+                                   error: error,
+                                   extra: extra,
+                                   user: user)
             throw error
         }
+        Analytics.shared.error(message: .decryptedMessageBodyFailed,
+                               error: "No error from crypto library",
+                               extra: extra,
+                               user: user)
         return nil
     }
     
@@ -412,7 +496,7 @@ extension Message {
         return try body.split()
     }
     
-    func getSessionKey(keys: Data, passphrase: String) throws -> SymmetricKey? {
+    func getSessionKey(keys: [Data], passphrase: String) throws -> SymmetricKey? {
         return try split()?.keyPacket?.getSessionFromPubKeyPackage(passphrase, privKeys: keys)
     }
     

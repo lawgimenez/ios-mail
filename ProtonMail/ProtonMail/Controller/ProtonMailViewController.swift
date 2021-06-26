@@ -110,16 +110,22 @@ extension UIViewController {
             NSAttributedString.Key.font: navigationBarTitleFont
         ]
     }
+    
+    func removePresentedViewController() {
+        guard let vc = self.presentedViewController else {return}
+        vc.dismiss(animated: true, completion: nil)
+    }
 }
 
 
-class ProtonMailViewController: UIViewController, ProtonMailViewControllerProtocol {
+class ProtonMailViewController: UIViewController, ProtonMailViewControllerProtocol, AccessibleView {
 
     @IBOutlet weak var menuButton: UIBarButtonItem!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         UIViewController.setup(self, self.menuButton, self.shouldShowSideMenu())
+        generateAccessibilityIdentifiers()
     }
     
     override var preferredStatusBarStyle : UIStatusBarStyle {
@@ -140,13 +146,14 @@ class ProtonMailViewController: UIViewController, ProtonMailViewControllerProtoc
     }
 }
 
-class ProtonMailTableViewController: UITableViewController, ProtonMailViewControllerProtocol {
+class ProtonMailTableViewController: UITableViewController, ProtonMailViewControllerProtocol, AccessibleView {
     
     @IBOutlet weak var menuButton: UIBarButtonItem!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         UIViewController.setup(self, self.menuButton, self.shouldShowSideMenu())
+        generateAccessibilityIdentifiers()
     }
     
     override var preferredStatusBarStyle : UIStatusBarStyle {
@@ -157,13 +164,14 @@ class ProtonMailTableViewController: UITableViewController, ProtonMailViewContro
 
 
 // FIXME: this is a temporary class. refactor it later
-class ProtonMailTabBarController: UITabBarController, ProtonMailViewControllerProtocol {
+class ProtonMailTabBarController: UITabBarController, ProtonMailViewControllerProtocol, AccessibleView {
     
     @IBOutlet weak var menuButton: UIBarButtonItem!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         UIViewController.setup(self, self.menuButton, self.shouldShowSideMenu())
+        generateAccessibilityIdentifiers()
     }
     
     override var preferredStatusBarStyle : UIStatusBarStyle {

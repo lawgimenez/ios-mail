@@ -24,7 +24,9 @@
 import Foundation
 import PMKeymaker
 import LocalAuthentication
-
+#if !APP_EXTENSION
+import PMPayments
+#endif
 
 enum SignInUIFlow : Int {
     case requirePin = 0
@@ -48,6 +50,7 @@ protocol UnlockManagerDelegate : class {
 
 class UnlockManager: Service {
     var cacheStatus : CacheStatusInject
+    private var mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     weak var delegate : UnlockManagerDelegate?
     
     static var shared: UnlockManager {
@@ -57,6 +60,9 @@ class UnlockManager: Service {
     init(cacheStatus: CacheStatusInject, delegate: UnlockManagerDelegate?) {
         self.cacheStatus = cacheStatus
         self.delegate = delegate
+        
+        mutex.initialize(to: pthread_mutex_t())
+        pthread_mutex_init(mutex, nil)
     }
     
     internal func isUnlocked() -> Bool {
@@ -165,10 +171,9 @@ class UnlockManager: Service {
         #if !APP_EXTENSION
         sharedServices.get(by: UsersManager.self).users.forEach {
             $0.messageService.injectTransientValuesIntoMessages()
-            self.updateUserData(of: $0)
         }
         self.updateCommonUserData()
-        StoreKitManager.default.processAllTransactions()
+        StoreKitManager.default.continueRegistrationPurchase()
         #endif
         
         NotificationCenter.default.post(name: Notification.Name.didUnlock, object: nil) // needed for app unlock
@@ -178,12 +183,6 @@ class UnlockManager: Service {
     
     
     #if !APP_EXTENSION
-    // TODO: verify if some of these operations can be optimized
-    private func updateUserData(of user: UserManager) { // previously this method was called loadContactsAfterInstall()
-        user.sevicePlanService.updateServicePlans()
-        user.sevicePlanService.updateCurrentSubscription()
-    }
-    
     func updateCommonUserData() {
 //        sharedUserDataService.fetchUserInfo().done { _ in }.catch { _ in }
 //        //TODO:: here need to be changed

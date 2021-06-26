@@ -24,7 +24,7 @@
 import Foundation
 import MBProgressHUD
 
-class MailboxPasswordViewController: UIViewController {
+class MailboxPasswordViewController: UIViewController, AccessibleView {
     let animationDuration: TimeInterval = 0.5
     let buttonDisabledAlpha: CGFloat = 0.5
     let keyboardPadding: CGFloat = 12
@@ -62,6 +62,7 @@ class MailboxPasswordViewController: UIViewController {
         topTitleLabel.text = LocalString._decrypt_mailbox
         decryptButton.setTitle(LocalString._decrypt, for: .normal)
         resetMailboxPasswordAction.setTitle(LocalString._reset_mailbox_password, for: .normal)
+        generateAccessibilityIdentifiers()
     }
     
     override var preferredStatusBarStyle : UIStatusBarStyle {
@@ -120,11 +121,6 @@ class MailboxPasswordViewController: UIViewController {
         NotificationCenter.default.removeKeyboardObserver(self)
     }
     
-    override func segueForUnwinding(to toViewController: UIViewController, from fromViewController: UIViewController, identifier: String?) -> UIStoryboardSegue {
-        navigationController?.setNavigationBarHidden(true, animated: true)
-        return super.segueForUnwinding(to: toViewController, from: fromViewController, identifier: identifier)!
-    }
-    
     func setupDecryptButton() {
         decryptButton.layer.borderColor = UIColor.ProtonMail.Login_Button_Border_Color.cgColor;
         decryptButton.alpha = buttonDisabledAlpha
@@ -137,8 +133,9 @@ class MailboxPasswordViewController: UIViewController {
     // MARK: - private methods
     @IBAction func onePasswordAction(_ sender: UIButton) {
         OnePasswordExtension.shared().findLogin(forURLString: "https://protonmail.com", for: self, sender: sender, completion: { (loginDictionary, error) -> Void in
+            let cancelError: AppExtensionErrorCode = .cancelledByUser
             if loginDictionary == nil {
-                if (error as NSError?)?.code != Int(AppExtensionErrorCodeCancelledByUser) {
+                if (error as NSError?)?.code != Int(cancelError.rawValue) {
                     PMLog.D("Error invoking Password App Extension for find login: \(String(describing: error))")
                 }
                 return

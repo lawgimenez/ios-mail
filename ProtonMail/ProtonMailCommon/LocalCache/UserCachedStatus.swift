@@ -23,6 +23,9 @@
 
 import Foundation
 import PMKeymaker
+#if !APP_EXTENSION
+import PMPayments
+#endif
 
 let userCachedStatus = UserCachedStatus()
 
@@ -32,7 +35,7 @@ final class UserCachedStatus : SharedCacheBase {
     struct Key {
         // inuse
 //        static let lastCacheVersion = "last_cache_version" //user cache
-        static let isCheckSpaceDisabled = "isCheckSpaceDisabledKey" //user cache
+        static let isCheckSpaceDisabled = "isCheckSpaceDisabledKey" //Legacy -- remove it later
         static let lastAuthCacheVersion = "last_auth_cache_version" //user cache
         static let cachedServerNotices = "cachedServerNotices" //user cache
         static let showServerNoticesNextTime = "showServerNoticesNextTime" //user cache
@@ -64,6 +67,7 @@ final class UserCachedStatus : SharedCacheBase {
         static let UserWithLocalMobileSignature = "user_with_local_mobile_signature_mainKeyProtected"
         static let UserWithLocalMobileSignatureStatus = "user_with_local_mobile_signature_status"
         static let UserWithDefaultSignatureStatus = "user_with_default_signature_status"
+        static let UserWithIsCheckSpaceDisabledStatus = "user_with_is_check_space_disabled_status"
         
         // Snooze Notifications
         static let snoozeConfiguration = "snoozeConfiguration"
@@ -87,6 +91,9 @@ final class UserCachedStatus : SharedCacheBase {
         
         //new value to check new messages
         static let newMessageFromNotification = "new_message_from_notification"
+        
+        //check if the iOS 10 alert is shown
+        static let iOS10AlertIsShown = "ios_10_alert_is_shown"
     }
     
     var primaryUserSessionId: String? {
@@ -136,6 +143,18 @@ final class UserCachedStatus : SharedCacheBase {
             setValue(newValue, forKey: Key.combineContactFlag)
         }
     }
+    
+    var iOS10AlertIsShown: Bool {
+        get {
+            if getShared().object(forKey: Key.iOS10AlertIsShown) == nil {
+                return false
+            }
+            return getShared().bool(forKey: Key.iOS10AlertIsShown)
+        }
+        set {
+            setValue(newValue, forKey: Key.iOS10AlertIsShown)
+        }
+    }
 //    var neverShowDohWarning: Bool {
 //        get {
 //            return getShared().bool(forKey: Key.dohWarningAsk)
@@ -160,15 +179,6 @@ final class UserCachedStatus : SharedCacheBase {
        }
 
     var isForcedLogout : Bool = false
-    
-    var isCheckSpaceDisabled: Bool {
-        get {
-            return getShared().bool(forKey: Key.isCheckSpaceDisabled)
-        }
-        set {
-            setValue(newValue, forKey: Key.isCheckSpaceDisabled)
-        }
-    }
     
     var isPMMEWarningDisabled : Bool {
         get {
@@ -236,7 +246,7 @@ final class UserCachedStatus : SharedCacheBase {
                 let customSignature = try? locked.unlock(with: mainKey) else
             {
                 SharedCacheBase.getDefault()?.removeObject(forKey: Key.lastLocalMobileSignature)
-                return "Sent from ProtonMail Mobile"
+                return "Sent from ProtonMail for iOS"
             }
 
             return customSignature
@@ -297,7 +307,7 @@ final class UserCachedStatus : SharedCacheBase {
     func setDefaultSignatureSwitchStatus(uid: String, value: Bool) {
         guard var switchData = SharedCacheBase.getDefault()?.dictionary(forKey: Key.UserWithDefaultSignatureStatus) else {
             var newDictiondary: [String: Bool] = [:]
-            newDictiondary[uid] = true
+            newDictiondary[uid] = value
             SharedCacheBase.getDefault()?.set(newDictiondary, forKey: Key.UserWithDefaultSignatureStatus)
             SharedCacheBase.getDefault()?.synchronize()
             return
@@ -328,7 +338,7 @@ final class UserCachedStatus : SharedCacheBase {
     func setMobileSignatureSwitchStatus(uid: String, value: Bool) {
         guard var switchData = SharedCacheBase.getDefault()?.dictionary(forKey: Key.UserWithLocalMobileSignatureStatus) else {
             var newDictiondary: [String: Bool] = [:]
-            newDictiondary[uid] = true
+            newDictiondary[uid] = value
             SharedCacheBase.getDefault()?.set(newDictiondary, forKey: Key.UserWithLocalMobileSignatureStatus)
             SharedCacheBase.getDefault()?.synchronize()
             return
@@ -368,7 +378,7 @@ final class UserCachedStatus : SharedCacheBase {
             
             SharedCacheBase.getDefault()?.removeObject(forKey: Key.lastLocalMobileSignature)
             removeMobileSignature(uid: uid)
-            return "Sent from ProtonMail Mobile"
+            return "Sent from ProtonMail for iOS"
         }
         return customSignature
     }
@@ -400,6 +410,37 @@ final class UserCachedStatus : SharedCacheBase {
         }
     }
     
+    func getIsCheckSpaceDisabledStatus(by uid: String) -> Bool? {
+        guard let switchData = SharedCacheBase.getDefault()?.dictionary(forKey: Key.UserWithIsCheckSpaceDisabledStatus),
+        let switchStatus = switchData[uid] as? Bool else {
+            return nil
+        }
+        return switchStatus
+    }
+    
+    func setIsCheckSpaceDisabledStatus(uid: String, value: Bool) {
+        guard var switchData = SharedCacheBase.getDefault()?.dictionary(forKey: Key.UserWithIsCheckSpaceDisabledStatus) else {
+            var newDictiondary: [String: Bool] = [:]
+            newDictiondary[uid] = value
+            SharedCacheBase.getDefault()?.set(newDictiondary, forKey: Key.UserWithIsCheckSpaceDisabledStatus)
+            SharedCacheBase.getDefault()?.synchronize()
+            return
+        }
+        switchData[uid] = value
+        SharedCacheBase.getDefault()?.set(switchData, forKey: Key.UserWithIsCheckSpaceDisabledStatus)
+        SharedCacheBase.getDefault()?.synchronize()
+    }
+    
+    func removeIsCheckSpaceDisabledStatus(uid: String) {
+        guard var switchData = SharedCacheBase.getDefault()?.dictionary(forKey: Key.UserWithIsCheckSpaceDisabledStatus) else {
+            return
+        }
+        
+        switchData.removeValue(forKey: uid)
+        SharedCacheBase.getDefault()?.set(switchData, forKey: Key.UserWithIsCheckSpaceDisabledStatus)
+        SharedCacheBase.getDefault()?.synchronize()
+    }
+    
     func signOut()
     {
         getShared().removeObject(forKey: Key.lastFetchMessageID)
@@ -412,6 +453,7 @@ final class UserCachedStatus : SharedCacheBase {
         getShared().removeObject(forKey: Key.lastAuthCacheVersion)
         getShared().removeObject(forKey: Key.isPM_MEWarningDisabled)
         getShared().removeObject(forKey: Key.combineContactFlag)
+        getShared().removeObject(forKey: Key.browser)
         
         //pin code
         getShared().removeObject(forKey: Key.lastPinFailedTimes)
@@ -435,13 +477,14 @@ final class UserCachedStatus : SharedCacheBase {
         KeychainWrapper.keychain.remove(forKey: Key.browser)
         
         ////
-        getShared().removeObject(forKey: Key.dohFlag)
         getShared().removeObject(forKey: Key.dohWarningAsk)
                         
         getShared().synchronize()
     }
     
     func cleanGlobal() {
+        getShared().removeObject(forKey: Key.dohFlag)
+        
         getShared().removeObject(forKey: Key.lastSplashViersion)
         getShared().removeObject(forKey: Key.lastTourViersion)
         
@@ -543,14 +586,13 @@ extension UserCachedStatus {
 extension UserCachedStatus {
     var browser: LinkOpener {
         get {
-            guard let string = KeychainWrapper.keychain.string(forKey: Key.browser),
-                let mode = LinkOpener(rawValue: string) else
-            {
+            guard let raw = KeychainWrapper.keychain.string(forKey: Key.browser) ?? getShared().string(forKey: Key.browser) else {
                 return .safari
             }
-            return mode
+            return LinkOpener(rawValue: raw) ?? .safari
         }
         set {
+            getShared().setValue(newValue.rawValue, forKey: Key.browser)
             KeychainWrapper.keychain.set(newValue.rawValue, forKey: Key.browser)
         }
     }
@@ -595,7 +637,7 @@ extension UserCachedStatus: ServicePlanDataStorage {
         }
     }
     
-    var isIAPAvailableOnBE: Bool {
+    var isIAPUpgradePlanAvailable: Bool {
         get {
             return self.getShared().bool(forKey: Key.isIAPAvailableOnBE)
         }

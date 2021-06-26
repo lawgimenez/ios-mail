@@ -49,6 +49,7 @@ protocol ComposeViewDelegate: class {
     func composeViewPickFrom(_ composeView: ComposeHeaderViewController)
 
     func lockerCheck(model: ContactPickerModelProtocol, progress: () -> Void, complete: LockCheckComplete?)
+    func checkMails(in contactGroup: ContactGroupVO, progress: () -> Void, complete: LockCheckComplete?)
 }
 
 protocol ComposeViewDataSource: class {
@@ -57,7 +58,7 @@ protocol ComposeViewDataSource: class {
     func composeViewSelectedContactsForPicker(_ composeView: ComposeHeaderViewController, picker: ContactPicker) -> [ContactPickerModelProtocol]
 }
 
-class ComposeHeaderViewController: UIViewController {
+class ComposeHeaderViewController: UIViewController, AccessibleView {
     private var height: NSLayoutConstraint!
     @objc internal dynamic var size: CGSize = .zero {
         didSet {
@@ -237,10 +238,16 @@ class ComposeHeaderViewController: UIViewController {
     fileprivate var isShowingCcBccView: Bool = false
     fileprivate var hasExpirationSchedule: Bool = false
     
+    ///Use this flag to control the email validation action
+    var shouldValidateTheEmail = true
+
+    private let internetConnectionStatusProvider = InternetConnectionStatusProvider()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        self.height = self.view.heightAnchor.constraint(equalToConstant: 0.1)
+        // 184 is default height of header view
+        self.height = self.view.heightAnchor.constraint(equalToConstant: 184)
         self.height.priority = .init(999.0)
         self.height.isActive = true
         
@@ -271,12 +278,19 @@ class ComposeHeaderViewController: UIViewController {
         
         // accessibility
         self.view.isAccessibilityElement = false
-        self.accessibilityElements = [ self.fromPickerButton,
-                                       self.toContactPicker,
-                                       self.ccContactPicker, self.bccContactPicker,
-                                       self.subject,
-                                       self.expirationView, self.buttonView, self.passwordView
+        self.accessibilityElements = [ self.fromPickerButton!,
+                                       self.toContactPicker!,
+                                       self.ccContactPicker!, self.bccContactPicker!,
+                                       self.subject!,
+                                       self.expirationView!, self.buttonView!, self.passwordView!
         ]
+        generateAccessibilityIdentifiers()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        observeInternetConnectionStatus()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -285,6 +299,12 @@ class ComposeHeaderViewController: UIViewController {
             self.setShowingCcBccView(to: showCcBcc)
         }
         self.notifyViewSize( false )
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+
+        internetConnectionStatusProvider.stopInternetConnectionStatusObservation()
     }
     
     override func didReceiveMemoryWarning() {
@@ -414,9 +434,9 @@ class ComposeHeaderViewController: UIViewController {
     
     fileprivate func configureContactPickerTemplate() {
         ContactCollectionViewContactCell.appearance().tintColor = UIColor.ProtonMail.Blue_6789AB
-        ContactCollectionViewContactCell.appearance().font = Fonts.h6.light
-        ContactCollectionViewPromptCell.appearance().font = Fonts.h6.light
-        ContactCollectionViewEntryCell.appearance().font = Fonts.h6.light
+        ContactCollectionViewContactCell.appearance().font = Fonts.h5.regular
+        ContactCollectionViewPromptCell.appearance().font = Fonts.h5.regular
+        ContactCollectionViewEntryCell.appearance().font = Fonts.h5.regular
     }
     
     ///
@@ -433,7 +453,7 @@ class ComposeHeaderViewController: UIViewController {
         self.subject.leftView = subjectLeftPaddingView
         self.subject.leftViewMode = UITextField.ViewMode.always
         self.subject.autocapitalizationType = .sentences
-        
+
     }
     
     internal func setShowingCcBccView(to show: Bool) {
@@ -675,6 +695,20 @@ class ComposeHeaderViewController: UIViewController {
                                                  borderWidth: 1.0,
                                                  at: newHeight)
     }
+
+    private func observeInternetConnectionStatus() {
+        internetConnectionStatusProvider.getConnectionStatuses { [weak self] status in
+            guard status.isConnected else { return }
+            self?.checkEmails()
+        }
+    }
+
+    private func checkEmails() {
+        self.ccContactPicker.contactCollectionView.reloadData()
+        self.bccContactPicker.contactCollectionView.reloadData()
+        self.toContactPicker.contactCollectionView.reloadData()
+    }
+
 }
 
 
@@ -728,8 +762,10 @@ extension ComposeHeaderViewController: ContactPickerDelegate {
     }
     
     func contactPicker(contactPicker: ContactPicker, didEnterCustomText text: String, needFocus focus: Bool) {
-        let customContact = ContactVO(id: "", name: text, email: text)
-        contactPicker.addToSelectedContacts(model: customContact, needFocus: focus)
+        if self.shouldValidateTheEmail {
+            let customContact = ContactVO(id: "", name: text, email: text)
+            contactPicker.addToSelectedContacts(model: customContact, needFocus: focus)
+        }
     }
     
     func contactPicker(picker: ContactPicker, pasted text: String, needFocus focus: Bool) {
@@ -817,6 +853,10 @@ extension ComposeHeaderViewController: ContactPickerDelegate {
     
     func collectionContactCell(lockCheck model: ContactPickerModelProtocol, progress: () -> Void, complete: LockCheckComplete?) {
         self.delegate?.lockerCheck(model: model, progress: progress, complete: complete)
+    }
+    
+    func checkMails(in contactGroup: ContactGroupVO, progress: () -> Void, complete: LockCheckComplete?) {
+        self.delegate?.checkMails(in: contactGroup, progress: progress, complete: complete)
     }
     
     // MARK: Private delegate helper methods

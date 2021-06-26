@@ -24,7 +24,7 @@
 import UIKit
 import MCSwipeTableViewCell
 
-class MailboxMessageCell: MCSwipeTableViewCell {
+class MailboxMessageCell: MCSwipeTableViewCell, AccessibleCell {
     /**
     *  Constants
     */
@@ -240,8 +240,10 @@ class MailboxMessageCell: MCSwipeTableViewCell {
             hideForward()
         }
         
-        if let t : Date = message.time, let displayString = NSDate.stringForDisplay(from: t) {
+        if !message.isSending, let t : Date = message.time, let displayString = NSDate.stringForDisplay(from: t) {
             self.time.text = " \(displayString)"
+        } else if message.isSending {
+            self.time.text = " \(LocalString._mailbox_draft_is_sending)"
         } else {
             self.time.text = " "
         }
@@ -250,6 +252,7 @@ class MailboxMessageCell: MCSwipeTableViewCell {
         
         self.updateAccessibilityLabel()
         self.setNeedsUpdateConstraints()
+        generateCellAccessibilityIdentifiers(message.subject)
     }
     fileprivate func updateLables (_ labelView : LabelDisplayView, label:Label?) {
         if let label = label {

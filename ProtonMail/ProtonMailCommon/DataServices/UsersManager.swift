@@ -26,6 +26,7 @@ import AwaitKit
 import PromiseKit
 import PMKeymaker
 import Crypto
+import PMCommon
 
 protocol UsersManagerDelegate: class {
     func migrating()
@@ -120,7 +121,7 @@ class UsersManager : Service, Migrate {
     }
    
     /// Server's config like url port path etc..
-    var serverConfig : APIServerConfig
+    var doh : DoH
     /// the interface for talking to UI
     weak var delegate : UsersManagerDelegate?
     
@@ -142,14 +143,22 @@ class UsersManager : Service, Migrate {
     
     /// signIn manager application level
     
-    init(server: APIServerConfig, delegate : UsersManagerDelegate?) {
-        self.serverConfig = server
+    init(doh: DoH, delegate : UsersManagerDelegate?) {
+        self.doh = doh
+        
+        //init doh defalt on/off
+        self.doh.status = userCachedStatus.isDohOn ? .on : .off
+
+        
         self.delegate = delegate
         
         /// for migrate
         self.latestVersion = Version.version
         
         self.versionSaver = UserDefaultsSaver<Int>(key: CoderKey.Version)
+        
+        
+        setupValueTransforms()
     }
     
     /**
@@ -160,11 +169,12 @@ class UsersManager : Service, Migrate {
      **/
     func add(auth: AuthCredential, user: UserInfo) {
         let session = auth.sessionID
-        let userID = user.userId
-//        auth.userID = userID
-        let apiConfig = serverConfig
-        let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+        //let userID = user.userId
+        //let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+        let apiService = PMAPIService(doh: self.doh, sessionUID: session)
+        apiService.serviceDelegate = self
         let newUser = UserManager(api: apiService, userinfo: user, auth: auth, parent: self)
+        newUser.delegate = self
         self.removeDisconnectedUser(.init(defaultDisplayName: newUser.defaultDisplayName,
                           defaultEmail: newUser.defaultEmail,
                           userID: user.userId))
@@ -349,14 +359,16 @@ class UsersManager : Service, Migrate {
     func tryRestore() {
         // try new version first
         guard let mainKey = keymaker.mainKey else {
+            Analytics.shared.debug(message: .usersRestoreFailed, extra: ["IsMainKeyNil": true])
             return
         }
         
         if let oldAuth = oldAuthFetch(),  let user = oldUserInfo() {
             let session = oldAuth.sessionID
             let userID = user.userId
-            let apiConfig = serverConfig
-            let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+            
+            let apiService = PMAPIService(doh: self.doh, sessionUID: session)
+            apiService.serviceDelegate = self
             let newUser = UserManager(api: apiService, userinfo: user, auth: oldAuth, parent: self)
             newUser.delegate = self
             if let pwd = oldMailboxPassword() {
@@ -373,35 +385,50 @@ class UsersManager : Service, Migrate {
             
         } else {
             guard let encryptedAuthData = KeychainWrapper.keychain.data(forKey: CoderKey.authKeychainStore) else {
+                Analytics.shared.debug(message: .usersRestoreFailed, extra: ["IsKeychainNil": true])
                 return
             }
             let authlocked = Locked<[AuthCredential]>(encryptedValue: encryptedAuthData)
-            guard let auths = try? authlocked.unlock(with: mainKey) else {
+            let auths: [AuthCredential]
+            do {
+                auths = try authlocked.unlock(with: mainKey)
+            } catch {
+                Analytics.shared.error(message: .usersRestoreFailed, error: error, extra: ["IsUnlockFail": true])
                 return
             }
             
             guard let encryptedUsersData = SharedCacheBase.getDefault()?.data(forKey: CoderKey.usersInfo) else {
+                Analytics.shared.debug(message: .usersRestoreFailed, extra: ["IsDataNil": true])
                 return
             }
             
             let userslocked = Locked<[UserInfo]>(encryptedValue: encryptedUsersData)
             guard let userinfos = try? userslocked.unlock(with: mainKey)  else {
+                Analytics.shared.debug(message: .usersRestoreFailed, extra: ["IsDataUnlockFail": true])
                 return
             }
             
             guard userinfos.count == auths.count else {
+                Analytics.shared.debug(message: .usersRestoreFailed, extra: ["IsDataNotMatch": true])
                 return
             }
             
-            //TODO:: temp
-            if users.count > 0 {
+            //Check if the existing users is the same as the users stored on the device
+            let userIds = userinfos.map { $0.userId }
+            let existUserIds = users.map { $0.userinfo.userId }
+            if users.count > 0 &&
+                existUserIds.count == userIds.count &&
+                existUserIds.map({ userIds.contains($0) }).filter({ $0 }).count == userIds.count {
                 return
             }
+            
+            users.removeAll()
+            
             for (auth, user) in zip(auths, userinfos) {
                 let session = auth.sessionID
                 let userID = user.userId
-                let apiConfig = serverConfig
-                let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+                let apiService = PMAPIService(doh: self.doh, sessionUID: session)
+                apiService.serviceDelegate = self
                 let newUser = UserManager(api: apiService, userinfo: user, auth: auth, parent: self)
                 newUser.delegate = self
                 users.append(newUser)
@@ -487,23 +514,28 @@ extension UsersManager {
         self.users.forEach { $0.launchCleanUpIfNeeded() }
     }
     
-    func logout(user: UserManager, shouldAlert: Bool = false) {
-        user.cleanUp()
-        
-        if let primary = self.users.first, primary.isMatch(sessionID: user.auth.sessionID) {
-            self.remove(user: user)
-            NotificationCenter.default.post(name: Notification.Name.didPrimaryAccountLogout, object: nil)
-            NSError.alertBadTokenToast()
-        } else {
-            self.remove(user: user)
-        }
-        
-        if self.users.isEmpty {
-            self.clean()
-        } else if shouldAlert {
-            String(format: LocalString._logout_account_switched_when_token_revoked,
-                   arguments: [user.defaultEmail,
-                               self.users.first!.defaultEmail]).alertToast()
+    func logout(user: UserManager, shouldShowAccountSwitchAlert: Bool = false) -> Promise<Void> {
+        var isPrimaryAccountLogout = false
+        return user.cleanUp().then { _ -> Promise<Void> in
+            if let primary = self.users.first, primary.isMatch(sessionID: user.auth.sessionID) {
+                self.remove(user: user)
+                isPrimaryAccountLogout = true
+            } else {
+                self.remove(user: user)
+            }
+            
+            if self.users.isEmpty {
+                return self.clean()
+            } else if shouldShowAccountSwitchAlert {
+                String(format: LocalString._logout_account_switched_when_token_revoked,
+                       arguments: [user.defaultEmail,
+                                   self.users.first!.defaultEmail]).alertToast()
+            }
+            return Promise()
+        }.done {
+            if isPrimaryAccountLogout {
+                NotificationCenter.default.post(name: Notification.Name.didPrimaryAccountLogout, object: nil)
+            }
         }
     }
     
@@ -518,39 +550,39 @@ extension UsersManager {
         self.save()
     }
     
-    internal func clean() { 
-        UserManager.cleanUpAll()
-        
-        SharedCacheBase.getDefault()?.remove(forKey: CoderKey.usersInfo)
-        KeychainWrapper.keychain.remove(forKey: CoderKey.keychainStore)
-        KeychainWrapper.keychain.remove(forKey: CoderKey.authKeychainStore)
-        KeychainWrapper.keychain.remove(forKey: CoderKey.atLeastOneLoggedIn)
-        KeychainWrapper.keychain.remove(forKey: CoderKey.disconnectedUsers)
-        
-        self.currentVersion = latestVersion
-        
-        UserTempCachedStatus.backup()
-        
-        
-        sharedUserDataService.signOut(true)
-                
-        userCachedStatus.signOut()
-        self.users.forEach { user in
-            user.userService.signOut(true)
-            user.messageService.launchCleanUpIfNeeded()
+    internal func clean() -> Promise<Void> {
+        return UserManager.cleanUpAll().ensure {
+            SharedCacheBase.getDefault()?.remove(forKey: CoderKey.usersInfo)
+            KeychainWrapper.keychain.remove(forKey: CoderKey.keychainStore)
+            KeychainWrapper.keychain.remove(forKey: CoderKey.authKeychainStore)
+            KeychainWrapper.keychain.remove(forKey: CoderKey.atLeastOneLoggedIn)
+            KeychainWrapper.keychain.remove(forKey: CoderKey.disconnectedUsers)
+            
+            self.currentVersion = self.latestVersion
+            
+            UserTempCachedStatus.backup()
+            
+            
+            sharedUserDataService.signOut(true)
+                    
+            userCachedStatus.signOut()
+            self.users.forEach { user in
+                user.userService.signOut(true)
+                user.messageService.launchCleanUpIfNeeded()
+            }
+            self.users = []
+            self.save()
+            
+            // device level service
+            keymaker.wipeMainKey()
+            // good opportunity to remove all temp folders
+            FileManager.default.cleanTemporaryDirectory()
+            // some tests are messed up without tmp folder, so let's keep it for consistency
+            #if targetEnvironment(simulator)
+            try? FileManager.default.createDirectory(at: FileManager.default.temporaryDirectoryUrl, withIntermediateDirectories: true, attributes:
+                    nil)
+            #endif
         }
-        self.users = []
-        self.save()
-        
-        // device level service
-        keymaker.wipeMainKey()
-        // good opportunity to remove all temp folders
-        FileManager.default.cleanTemporaryDirectory()
-        // some tests are messed up without tmp folder, so let's keep it for consistency
-        #if targetEnvironment(simulator)
-        try? FileManager.default.createDirectory(at: FileManager.default.temporaryDirectoryUrl, withIntermediateDirectories: true, attributes:
-                nil)
-        #endif
     }
     
     func hasUsers() -> Bool {
@@ -563,7 +595,9 @@ extension UsersManager {
         let isMailboxPasswordStored = KeychainWrapper.keychain.data(forKey: CoderKey.mailboxPassword) != nil
         let isSignIn = users.hasUserName() && isMailboxPasswordStored
         
-        return KeychainWrapper.keychain.data(forKey: CoderKey.authKeychainStore) != nil && (hasUsersInfo || isSignIn)
+        let authKeychainStore = KeychainWrapper.keychain.data(forKey: CoderKey.authKeychainStore)
+        
+        return  authKeychainStore != nil && (hasUsersInfo || isSignIn)
     }
     
     var isPasswordStored : Bool {
@@ -579,10 +613,8 @@ extension UsersManager {
         KeychainWrapper.keychain.set("LoggedIn", forKey: CoderKey.atLeastOneLoggedIn)
     }
     
-    func loggedOutAll() {
-        for user in users {
-            self.logout(user: user)
-        }
+    func loggedOutAll() -> Promise<Void> {
+        return when(fulfilled: users.map{ self.logout(user: $0) })
     }
     
     func freeAccountNum() -> Int {
@@ -663,8 +695,8 @@ extension UsersManager {
         if let oldAuth = oldAuthFetchLagcy(),  let user = oldUserInfoLagcy() {
             let session = oldAuth.sessionID
             let userID = user.userId
-            let apiConfig = serverConfig
-            let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+            let apiService = PMAPIService(doh: self.doh, sessionUID: session)
+            apiService.serviceDelegate = self
             let newUser = UserManager(api: apiService, userinfo: user, auth: oldAuth, parent: self)
             newUser.delegate = self
             if let pwd = oldMailboxPassword() {
@@ -709,8 +741,8 @@ extension UsersManager {
             for (auth, user) in zip(auths, userinfos) {
                 let session = auth.sessionID
                 let userID = user.userId
-                let apiConfig = serverConfig
-                let apiService = APIService(config: apiConfig, sessionUID: session, userID: userID)
+                let apiService = PMAPIService(doh: self.doh, sessionUID: session)
+                apiService.serviceDelegate = self
                 let newUser = UserManager(api: apiService, userinfo: user, auth: auth, parent: self)
                 newUser.delegate = self
                 users.append(newUser)
@@ -727,7 +759,6 @@ extension UsersManager {
             }
             return true
         }
-        return false
     }
     
     func oldAuthFetchLagcy() -> AuthCredential? {
@@ -813,4 +844,24 @@ extension UsersManager {
 //        }
     }
     
+}
+
+extension UsersManager: APIServiceDelegate {
+    func isReachable() -> Bool {
+        return sharedInternetReachability.currentReachabilityStatus() != NetworkStatus.NotReachable
+    }
+
+    func onUpdate(serverTime: Int64) {
+        Crypto.updateTime(serverTime)
+    }
+
+    var appVersion: String {
+        return "iOS_\(Bundle.main.majorVersion)"
+    }
+
+    var userAgent: String? {
+        UserAgent.default.ua
+    }
+
+    func onDohTroubleshot() { }
 }

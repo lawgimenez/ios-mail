@@ -23,8 +23,9 @@
 
 import UIKit
 import CoreData
+import PromiseKit
 
-class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew {
+class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew, AccessibleView {
     /// those two are optional
     typealias viewModelType = MenuViewModel
     typealias coordinatorType = MenuCoordinatorNew
@@ -80,12 +81,14 @@ class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew {
         self.updateRevealWidth()
         
         //setup labels fetch controller
-        self.viewModel.setupLabels(delegate: self)
-        
+        setupLabelsIfViewIsLoaded()
+
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(didPrimaryAccountLoggedOut(_:)),
                                                name: NSNotification.Name.didPrimaryAccountLogout,
                                                object: nil)
+        
+        generateAccessibilityIdentifiers()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -108,6 +111,7 @@ class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew {
         
         updateEmailLabel()
         updateDisplayNameLabel()
+        setupLabelsIfViewIsLoaded(shouldFetchLabels: false)
         self.tableView.reloadData()
         
         if #available(iOS 10.0, *), Constants.Feature.snoozeOn {
@@ -210,15 +214,8 @@ class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew {
             if shouldDeleteMessageInQueue {
                 self.viewModel.removeAllQueuedMessageOfCurrentUser()
             }
-            
             self.signingOut = true
-            self.viewModel.signOut()
-            
-            self.viewModel.updateCurrent()
-            self.viewModel.setupLabels(delegate: self)
-            self.hideUsers()
-            self.sectionClicked = false
-            
+            _ = self.viewModel.signOut()
             self.signingOut = false
         }))
         alertController.popoverPresentationController?.sourceView = sender ?? self.view
@@ -233,7 +230,7 @@ class MenuViewController: UIViewController, ViewModelProtocol, CoordinatedNew {
             return
         }
         self.viewModel.updateCurrent()
-        self.viewModel.setupLabels(delegate: self)
+        setupLabelsIfViewIsLoaded()
         self.hideUsers()
         self.sectionClicked = false
         self.coordinator?.go(to: .mailbox)
@@ -315,7 +312,7 @@ extension MenuViewController: UITableViewDelegate {
         case .users:
             // pick it as current user
             self.viewModel.updateCurrent(row: row)
-            self.viewModel.setupLabels(delegate: self)
+            setupLabelsIfViewIsLoaded()
             self.hideUsers()
             self.sectionClicked = false
             self.coordinator?.go(to: .mailbox)
@@ -334,16 +331,21 @@ extension MenuViewController: UITableViewDelegate {
     func toInbox() {
         self.coordinator?.go(to: .mailbox, sender: MenuItem.inbox.menuToLabel)
     }
+
+    func setupLabelsIfViewIsLoaded(shouldFetchLabels: Bool = true) {
+        guard isViewLoaded else { return }
+        viewModel.setupLabels(delegate: self, shouldFetchLabels: shouldFetchLabels)
+    }
     
     func updateUser() {
-        DispatchQueue.main.async(execute: { () -> Void in
+        DispatchQueue.main.async(execute: { [weak self] in
             // pick it as current user
-            self.viewModel.updateCurrent()
-            self.viewModel.setupLabels(delegate: self)
-            self.hideUsers()
-            self.sectionClicked = false
-            self.tableView.reloadData()
-            self.coordinator?.go(to: .mailbox)
+            self?.viewModel.updateCurrent()
+            self?.setupLabelsIfViewIsLoaded()
+            self?.hideUsers()
+            self?.sectionClicked = false
+            self?.tableView.reloadData()
+            self?.coordinator?.go(to: .mailbox)
         })
     }
 }
@@ -383,9 +385,10 @@ extension MenuViewController: UITableViewDataSource {
         case .inboxes:
             let cell = tableView.dequeueReusableCell(withIdentifier: kMenuTableCellId, for: indexPath) as! MenuTableViewCell
             let data = self.viewModel.item(inboxes: row)
-            let count = self.viewModel.count(by: data.menuToLabel.rawValue, userID: nil)
+            self.viewModel.count(by: data.menuToLabel.rawValue, userID: nil).done { (count) in
+                cell.configUnreadCount(count: count)
+            }.cauterize()
             cell.configCell(data, hideSepartor: hideSepartor)
-            cell.configUnreadCount(count: count)
             return cell
         case .others:
             let cell = tableView.dequeueReusableCell(withIdentifier: kMenuTableCellId, for: indexPath) as! MenuTableViewCell
@@ -395,17 +398,19 @@ extension MenuViewController: UITableViewDataSource {
         case .labels:
             let cell = tableView.dequeueReusableCell(withIdentifier: kLabelTableCellId, for: indexPath) as! MenuLabelViewCell
             if let data = self.viewModel.label(at: row) {
-                let count = self.viewModel.count(by: data.labelID, userID: data.userID)
+                self.viewModel.count(by: data.labelID, userID: data.userID).done { (count) in
+                    cell.configUnreadCount(count: count)
+                }.cauterize()
                 cell.configCell(data, hideSepartor: hideSepartor)
-                cell.configUnreadCount(count: count)
             }
             return cell
         case .users:
             let cell = tableView.dequeueReusableCell(withIdentifier: kUserTableCellID, for: indexPath) as! MenuUserViewCell
             if let user = self.viewModel.user(at: row) {
                 cell.configCell(type: .LoggedIn, name: user.defaultDisplayName, email: user.defaultEmail)
-                let count = user.getUnReadCount(by: Message.Location.inbox.rawValue)
-                cell.configUnreadCount(count: count)
+                _ = user.getUnReadCount(by: Message.Location.inbox.rawValue).done { (count) in
+                    cell.configUnreadCount(count: count)
+                }
             }
             cell.hideSepartor(hideSepartor)
             return cell
@@ -422,7 +427,8 @@ extension MenuViewController: UITableViewDataSource {
             return cell
         case .accountManager:
             let cell = tableView.dequeueReusableCell(withIdentifier: kButtonTableCellID, for: indexPath) as! MenuButtonViewCell
-             return cell
+            cell.configCell(LocalString._menu_manage_accounts, containsStackView: false, hideSepartor: false)
+            return cell
         default:
             let cell: MenuTableViewCell = tableView.dequeueReusableCell(withIdentifier: kMenuTableCellId, for: indexPath) as! MenuTableViewCell
             return cell
@@ -491,8 +497,8 @@ extension MenuViewController: NSFetchedResultsControllerDelegate {
                     tableView.insertRows(at: [IndexPath(row: newIndexPath.row, section: 2)], with: UITableView.RowAnimation.fade)
                 }
             case .move:
-                if let indexPath = indexPath {
-                    if let newIndexPath = newIndexPath {
+                if let indexPath = indexPath, let newIndexPath = newIndexPath {
+                    if tableView.cellForRow(at: indexPath) != nil && tableView.cellForRow(at: newIndexPath) != nil {
                         tableView.moveRow(at: IndexPath(row: indexPath.row, section: 2), to: IndexPath(row: newIndexPath.row, section: 2))
                     }
                 }
@@ -502,11 +508,14 @@ extension MenuViewController: NSFetchedResultsControllerDelegate {
                     if let cell = tableView.cellForRow(at: index) as? MenuLabelViewCell {
                         if let data = self.viewModel.label(at: index.row) {
                             cell.configCell(data, hideSepartor: cell.separtor.isHidden)
-                            let count = self.viewModel.count(by: data.labelID, userID: nil)
-                            cell.configUnreadCount(count: count)
+                            self.viewModel.count(by: data.labelID, userID: nil).done { (count) in
+                                cell.configUnreadCount(count: count)
+                            }.cauterize()
                         }
                     }
                 }
+            @unknown default:
+                break
             }
         }
     }

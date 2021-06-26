@@ -23,6 +23,7 @@
 
 import Foundation
 import CoreData
+import PMCommon
 
 enum SwipeResponse {
     case showUndo
@@ -48,7 +49,7 @@ extension MailboxViewModel {
     }
 }
 
-class MailboxViewModel {
+class MailboxViewModel: StorageLimit {
     internal let labelID : String
     /// message service
     internal let user: UserManager
@@ -56,10 +57,13 @@ class MailboxViewModel {
     private let pushService : PushNotificationService
     /// fetch controller
     private var fetchedResultsController: NSFetchedResultsController<NSFetchRequestResult>?
+    private(set) var labelFetchedResults: NSFetchedResultsController<NSFetchRequestResult>?
     /// local message for rating
     private var ratingMessage : Message?
     
     private var contactService : ContactDataService
+    
+    private let coreDataService: CoreDataService
     
     ///
     internal weak var users: UsersManager?
@@ -69,11 +73,12 @@ class MailboxViewModel {
     /// - Parameters:
     ///   - labelID: location id and labelid
     ///   - msgService: service instance
-    init(labelID : String, userManager: UserManager, usersManager: UsersManager?, pushService: PushNotificationService) {
+    init(labelID : String, userManager: UserManager, usersManager: UsersManager?, pushService: PushNotificationService, coreDataService: CoreDataService) {
         self.labelID = labelID
         self.user = userManager
         self.messageService = userManager.messageService
         self.contactService = userManager.contactService
+        self.coreDataService = coreDataService
         self.pushService = pushService
         self.users = usersManager
     }
@@ -123,13 +128,14 @@ class MailboxViewModel {
                     }
                 }
                 
-                if let updateTime = lastUpdatedStore.lastUpdate(by: self.labelID, userID: secondUser.userInfo.userId),
-                    updateTime.isNew == false, secondUser.messageService.isEventIDValid() {
+                if let updateTime = lastUpdatedStore.lastUpdate(by: self.labelID, userID: secondUser.userInfo.userId, context: self.coreDataService.mainManagedObjectContext),
+                   updateTime.isNew == false, secondUser.messageService.isEventIDValid(context: self.coreDataService.mainManagedObjectContext) {
                     secondUser.messageService.fetchEvents(byLable: self.labelID,
                                                           notificationMessageID: nil,
+                                                          context: self.coreDataService.mainManagedObjectContext,
                                                           completion: secondComplete)
                 } else {// this new
-                    if !secondUser.messageService.isEventIDValid() { //if event id is not valid reset
+                    if !secondUser.messageService.isEventIDValid(context: self.coreDataService.mainManagedObjectContext) { //if event id is not valid reset
                         secondUser.messageService.fetchMessagesWithReset(byLabel: self.labelID, time: 0, completion: secondComplete)
                     }
                     else {
@@ -158,17 +164,39 @@ class MailboxViewModel {
         return fetchedResultsController
     }
     
+    private func makeLabelFetchController() -> NSFetchedResultsController<NSFetchRequestResult>? {
+        guard let controller = self.user.labelService.fetchedResultsController(.all) else {
+            return nil
+        }
+        
+        do {
+            try controller.performFetch()
+        } catch let ex as NSError {
+            PMLog.D(" error: \(ex)")
+        }
+        
+        return controller
+    }
+    
     /// setup fetch controller
     ///
     /// - Parameter delegate: delegate from viewcontroller
     func setupFetchController(_ delegate: NSFetchedResultsControllerDelegate?) {
         self.fetchedResultsController = self.makeFetchController()
         self.fetchedResultsController?.delegate = delegate
+        
+        self.labelFetchedResults = self.makeLabelFetchController()
+        self.labelFetchedResults?.delegate = delegate
     }
     
     /// reset delegate if fetch controller is valid
     func resetFetchedController() {
         if let controller = self.fetchedResultsController {
+            controller.delegate = nil
+            self.fetchedResultsController = nil
+        }
+        
+        if let controller = self.labelFetchedResults {
             controller.delegate = nil
             self.fetchedResultsController = nil
         }
@@ -221,8 +249,9 @@ class MailboxViewModel {
     /// clean up the rate/review items
     func cleanReviewItems() {
         if let context = fetchedResultsController?.managedObjectContext {
-            context.perform {
+            coreDataService.enqueue(context: context) { (context) in
                 let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: Message.Attributes.entityName)
+                //TODO:: need filter by user id
                 fetchRequest.predicate = NSPredicate(format: "%K == 1", Message.Attributes.messageType)
                 do {
                     if let messages = try context.fetch(fetchRequest) as? [Message] {
@@ -267,7 +296,7 @@ class MailboxViewModel {
     ///
     /// - Returns: location cache info
     func lastUpdateTime() -> LabelUpdate? {
-        return lastUpdatedStore.lastUpdate(by: self.labelID, userID: self.messageService.userID) //TODO:: fix me
+        return lastUpdatedStore.lastUpdate(by: self.labelID, userID: self.messageService.userID, context: self.coreDataService.mainManagedObjectContext) //TODO:: fix me
     }
     
     
@@ -278,7 +307,7 @@ class MailboxViewModel {
     
     ///
     func selectedMessages(selected: NSMutableSet) -> [Message] {
-        return messageService.fetchMessages(withIDs: selected)
+        return messageService.fetchMessages(withIDs: selected, in: self.coreDataService.mainManagedObjectContext)
     }
     
     ///
@@ -364,7 +393,10 @@ class MailboxViewModel {
     }
     
     func fetchEvents(time: Int, notificationMessageID:String?, completion: CompletionBlock?) {
-        messageService.fetchEvents(byLable: self.labelID, notificationMessageID: notificationMessageID, completion: completion)
+        messageService.fetchEvents(byLable: self.labelID,
+                                   notificationMessageID: notificationMessageID,
+                                   context: self.coreDataService.mainManagedObjectContext,
+                                   completion: completion)
     }
     
     /// fetch messages and reset events
@@ -377,7 +409,7 @@ class MailboxViewModel {
     }
     
     func isEventIDValid() -> Bool {
-        return messageService.isEventIDValid()
+        return messageService.isEventIDValid(context: self.coreDataService.mainManagedObjectContext)
     }
     
     /// get the cached notification message id
@@ -409,7 +441,7 @@ class MailboxViewModel {
     }
 
     func mark(IDs messageIDs : NSMutableSet, unread: Bool) {
-        let messages = self.messageService.fetchMessages(withIDs: messageIDs)
+        let messages = self.messageService.fetchMessages(withIDs: messageIDs, in: coreDataService.mainManagedObjectContext)
         for msg in messages {
             messageService.mark(message : msg, unRead: unread)
         }
@@ -420,7 +452,7 @@ class MailboxViewModel {
     }
 
     func label(IDs messageIDs : NSMutableSet, with labelID: String, apply: Bool) {
-        let messages = self.messageService.fetchMessages(withIDs: messageIDs)
+        let messages = self.messageService.fetchMessages(withIDs: messageIDs, in: coreDataService.mainManagedObjectContext)
         for msg in messages {
             messageService.label(message: msg, label: labelID, apply: apply)
         }
@@ -435,21 +467,23 @@ class MailboxViewModel {
     }
     
     func move(IDs messageIDs : NSMutableSet, from fLabel: String, to tLabel: String) {
-        let messages = self.messageService.fetchMessages(withIDs: messageIDs)
+        let messages = self.messageService.fetchMessages(withIDs: messageIDs, in: coreDataService.mainManagedObjectContext)
         for msg in messages {
+            // the label that is not draft, sent, starred, allmail
+            var fLabel = msg.firstValidFolder() ?? fLabel
             messageService.move(message: msg, from: fLabel, to: tLabel)
         }
     }
     
     func undo(_ undo: UndoMessage) {
-        let messages = self.messageService.fetchMessages(withIDs: [undo.messageID])
+        let messages = self.messageService.fetchMessages(withIDs: [undo.messageID], in: self.coreDataService.mainManagedObjectContext)
         for msg in messages {
             messageService.move(message: msg, from: undo.newLabels, to: undo.origLabels)
         }
     }
     
     final func delete(IDs: NSMutableSet) {
-        let messages = self.messageService.fetchMessages(withIDs: IDs)
+        let messages = self.messageService.fetchMessages(withIDs: IDs, in: coreDataService.mainManagedObjectContext)
         for msg in messages {
             let _ = self.delete(message: msg)
         }
@@ -485,5 +519,19 @@ class MailboxViewModel {
             }
         }
         return (.nothing, nil)
+    }
+    
+    func checkStorageIsCloseLimit() {
+        let usedStorageSpace = self.user.userInfo.usedSpace
+        let maxStorageSpace = self.user.userInfo.maxSpace
+        checkSpace(usedStorageSpace, maxSpace: maxStorageSpace, user: self.user)
+    }
+    
+    func shouldShowUpdateAlert() -> Bool {
+        return false
+    }
+    
+    func setiOS10AlertIsShown() {
+        userCachedStatus.iOS10AlertIsShown = true
     }
 }

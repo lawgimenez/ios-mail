@@ -61,7 +61,7 @@ class ContactCollectionViewPromptCell: UICollectionViewCell {
         
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        self.addSubview(label)
+        self.contentView.addSubview(label)
         
         self.addConstraints(NSLayoutConstraint.constraints(withVisualFormat: "V:|[label]|",
                                                            options: NSLayoutConstraint.FormatOptions(rawValue: 0),
@@ -75,7 +75,7 @@ class ContactCollectionViewPromptCell: UICollectionViewCell {
         
         label.textAlignment = .left
         label.text = self.prompt
-        label.textColor = UIColor.black
+        label.textColor = UIColor(RRGGBB: UInt(0x4f4f61))
         
         self.promptLabel = label
     }
@@ -87,6 +87,7 @@ class ContactCollectionViewPromptCell: UICollectionViewCell {
         set {
             self._prompt = newValue
             self.promptLabel.text = self._prompt
+            self.promptLabel.accessibilityIdentifier = "\(self._prompt)Label"
         }
     }
     

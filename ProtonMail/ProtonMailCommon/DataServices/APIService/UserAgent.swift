@@ -25,9 +25,13 @@ import Foundation
 
 final class UserAgent {
     public static let `default` : UserAgent = UserAgent()
-    
+    private var mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     private var cachedUS : String?
-    private init () { }
+    private init () {
+        // init lock
+        mutex.initialize(to: pthread_mutex_t())
+        pthread_mutex_init(mutex, nil)
+    }
     
     //eg. Darwin/16.3.0
     private func DarwinVersion() -> String {
@@ -71,14 +75,16 @@ final class UserAgent {
     }
     
     private func UAString() -> String {
-        return "\(appNameAndVersion()) \(deviceName()) \(deviceVersion()) \(CFNetworkVersion()) \(DarwinVersion())"
+        return "\(appNameAndVersion()) (\(deviceVersion()); \(deviceName()))"
     }
     
     var ua : String? {
         get {
+            pthread_mutex_lock(self.mutex)
             if cachedUS == nil {
                 cachedUS = self.UAString()
             }
+            pthread_mutex_unlock(self.mutex)
             return cachedUS
         }
     }

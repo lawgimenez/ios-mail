@@ -55,6 +55,8 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
     
     private var isShowpwd      = false
     private var isRemembered   = false
+    private var twoFAErrorFailed = false
+    private var isPrepareSignup = false
     
     //define
     private let hidePriority : UILayoutPriority = UILayoutPriority(rawValue: 1.0)
@@ -200,7 +202,8 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
                                                 sender: sender,
                                                 completion: { (loginDictionary, error) -> Void in
             if loginDictionary == nil {
-                if error!._code != Int(AppExtensionErrorCodeCancelledByUser) {
+                let cancelError: AppExtensionErrorCode = .cancelledByUser
+                if error!._code != Int(cancelError.rawValue) {
                     PMLog.D("Error invoking Password App Extension for find login: \(String(describing: error))")
                 }
                 return
@@ -228,6 +231,7 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
         navigationController?.setNavigationBarHidden(true, animated: true)
         NotificationCenter.default.addKeyboardObserver(self)
         
+        self.isPrepareSignup = false
         let uName = (usernameTextField.text ?? "").trim()
         let pwd = (passwordTextField.text ?? "")
         
@@ -288,6 +292,8 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
         if UIDevice.current.isLargeScreen() && !isRemembered {
             usernameTextField.becomeFirstResponder()
         }
+        
+        self.handleUpdateAlert()
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -324,6 +330,16 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
     }
     
     // MARK: - Private methods
+    
+    private func handleUpdateAlert() {
+        if self.viewModel.shouldShowUpdateAlert() {
+            let alertVC = UIAlertController(title: LocalString._ios10_update_title, message: LocalString._ios10_update_body, preferredStyle: .alert)
+            alertVC.addOKAction { (_) in
+                self.viewModel.setiOS10AlertIsShown()
+            }
+            self.present(alertVC, animated: true, completion: nil)
+        }
+    }
     
     internal func hideLoginViews() {
         self.usernameView.alpha      = 0.0
@@ -405,15 +421,20 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
     
     @IBAction func signUpAction(_ sender: UIButton) {
         dismissKeyboard()
-        firstly {
-            self.viewModel.generateToken()
-        }.done { (token) in
-            self.performSegue(withIdentifier: self.kSignUpKeySegue, sender: token)
-        }.catch { (error) in
-            let alert = LocalString._mobile_signups_are_disabled_pls_later_pm_com.alertController()
-            alert.addOKAction()
-            self.present(alert, animated: true, completion: nil)
-        }
+        
+        if self.isPrepareSignup {return}
+        self.isPrepareSignup = true
+        self.performSegue(withIdentifier: self.kSignUpKeySegue, sender: "token")
+//        firstly {
+//            self.viewModel.generateToken()
+//        }.done { (token) in
+//            self.performSegue(withIdentifier: self.kSignUpKeySegue, sender: token)
+//        }.catch { (error) in
+//            let alert = LocalString._mobile_signups_are_disabled_pls_later_pm_com.alertController()
+//            alert.addOKAction()
+//            self.present(alert, animated: true, completion: nil)
+//            self.isPrepareSignup = false
+//        }
     }
     
     @IBAction func tapAction(_ sender: UITapGestureRecognizer) {
@@ -434,10 +455,18 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
             case .error(let error):
                 PMLog.D("error: \(error)")
                 self.showLoginViews()
-                if let _ = cachedTwoCode {
+                guard cachedTwoCode != nil else {
+                    self.handleRequestError(error)
+                    return
+                }
+                // When user input twoFA too quick, it may failed in first time
+                // auto retry once to prevent this situation
+                if self.twoFAErrorFailed {
+                    self.twoFAErrorFailed = false
                     self.performSegue(withIdentifier: self.kSegueTo2FACodeSegue, sender: self)
                 } else {
-                    self.handleRequestError(error)
+                    self.twoFAErrorFailed = true
+                    self.signIn(username: username, password: password, cachedTwoCode: cachedTwoCode)
                 }
             case .ok:
                 break
@@ -452,12 +481,17 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
     
     func handleRequestError (_ error : NSError) {
         let code = error.code
-        if code == NSURLErrorTimedOut {
-            
-        } else if code == NSURLErrorNotConnectedToInternet || code == NSURLErrorCannotConnectToHost {
- 
-        }
-        else if !self.checkDoh(error) && !code.forceUpgrade {
+//        if DoHMail.default.status != .off {
+//            let alertController = error.alertController()
+//            alertController.addOKAction()
+//            self.present(alertController, animated: true, completion: nil)
+//        }
+//        else if code == NSURLErrorNotConnectedToInternet || code == NSURLErrorCannotConnectToHost {
+//            let alertController = error.alertController()
+//            alertController.addOKAction()
+//            self.present(alertController, animated: true, completion: nil)
+//        }
+        if !self.checkDoh(error) && !code.forceUpgrade {
             let alertController = error.alertController()
             alertController.addOKAction()
             self.present(alertController, animated: true, completion: nil)
@@ -471,7 +505,8 @@ class SignInViewController: ProtonMailViewController, ViewModelProtocol, Coordin
             return false
         }
         
-        let message = error.localizedDescription
+        //TODO:: don't use FailureReason in the future. also need clean up
+        let message = error.localizedFailureReason ?? error.localizedDescription
         let alertController = UIAlertController(title: LocalString._protonmail,
                                                 message: message,
                                                 preferredStyle: .alert)
@@ -503,9 +538,13 @@ extension SignInViewController : TwoFACodeViewControllerDelegate {
 
 extension SignInViewController : PinCodeViewControllerDelegate {
     
-    func Cancel() {
-        UserTempCachedStatus.backup()
-        self.coordinator?.services.get(by: UsersManager.self).clean()
+    func Cancel() -> Promise<Void> {
+        return Promise { seal in
+            UserTempCachedStatus.backup()
+            self.coordinator?.services.get(by: UsersManager.self).clean().done {
+                seal.fulfill_()
+            }
+        }
     }
     
     func Next() {
@@ -566,7 +605,7 @@ extension SignInViewController: UITextFieldDelegate {
     
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == usernameTextField {
-            passwordTextField.becomeFirstResponder()
+            _ = passwordTextField.becomeFirstResponder()
         } else {
             textField.resignFirstResponder()
         }

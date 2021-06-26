@@ -29,6 +29,9 @@ class MessageContainerViewController: TableContainerViewController<MessageContai
     @IBOutlet weak var bottomView: MessageDetailBottomView! // TODO: this can be tableView section footer in conversation mode
     private var threadObservation: NSKeyValueObservation!
     private var standalonesObservation: [NSKeyValueObservation] = []
+    private var isFirstInit: Bool = true
+    private let internetConnectionStatusProvider = InternetConnectionStatusProvider()
+    private var isWebBodyLoaded = false
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -36,6 +39,7 @@ class MessageContainerViewController: TableContainerViewController<MessageContai
             self.view.window?.windowScene?.title = self.viewModel.thread.first?.header.title
         }
         self.viewModel.userActivity.becomeCurrent()
+        self.recoveryStates()
     }
     
     override func viewDidDisappear(_ animated: Bool) {
@@ -65,12 +69,38 @@ class MessageContainerViewController: TableContainerViewController<MessageContai
         let unreadButton = UIBarButtonItem(image: UIImage.Top.unread, style: .plain, target: self, action: #selector(topUnreadButtonTapped))
         unreadButton.accessibilityLabel = LocalString._mark_as_unread
         self.navigationItem.setRightBarButtonItems([moreButton, trashButton, folderButton, labelButton, unreadButton], animated: true)
+        self.navigationItem.assignNavItemIndentifiers()
         
         // others
         self.bottomView.delegate = self
         
         self.subscribeToThread()
         self.viewModel.downloadThreadDetails()
+        generateAccessibilityIdentifiers()
+        setUpBottomButtonsStateUpdates()
+    }
+
+    private func setUpBottomButtonsStateUpdates() {
+        internetConnectionStatusProvider.getConnectionStatuses { [weak self] _ in
+            self?.setUpBottomButtonsState()
+        }
+
+        self.viewModel.isWebViewBodyLoadedNotifier = { [weak self] isLoaded in
+            self?.isWebBodyLoaded = isLoaded
+            self?.setUpBottomButtonsState()
+        }
+    }
+
+    private var areBottomButtonEnabled: Bool {
+        let isConnected = internetConnectionStatusProvider.currentStatus.isConnected
+        let areDetailsDownloaded = viewModel.messages.allSatisfy(\.isDetailDownloaded)
+        return (isConnected || areDetailsDownloaded) && isWebBodyLoaded
+    }
+
+    private func setUpBottomButtonsState() {
+        bottomView.replyButton.isEnabled = areBottomButtonEnabled
+        bottomView.forwardButton.isEnabled = areBottomButtonEnabled
+        bottomView.replyAllButton.isEnabled = areBottomButtonEnabled
     }
     
     @objc func topMoreButtonTapped(_ sender: UIBarButtonItem) { 
@@ -253,6 +283,15 @@ class MessageContainerViewController: TableContainerViewController<MessageContai
         
         viewModel.thread.forEach(self.subscribeToStandalone)
     }
+    
+    private func recoveryStates() {
+        guard let point = self.viewModel.getContentOffset(),
+              isFirstInit else {
+            return
+        }
+        isFirstInit = false
+        self.tableView.contentOffset = point
+    }
 }
 
 extension MessageContainerViewController: ShowImageViewDelegate {
@@ -278,7 +317,10 @@ extension MessageContainerViewController: MessageDetailBottomViewDelegate {
 
 extension MessageContainerViewController: Deeplinkable {
     var deeplinkNode: DeepLink.Node {
+        let offset = self.tableView?.contentOffset.y ?? 0
+        let states: [String: Any] = [MessageContainerViewModel.StatesKey.offsetKey: offset]
         return DeepLink.Node(name: String(describing: MessageContainerViewController.self),
-                             value: self.viewModel.thread.first?.messageID)
+                             value: self.viewModel.thread.first?.messageID,
+                             states: states)
     }
 }

@@ -26,6 +26,7 @@ import UIKit
 import SWRevealViewController
 import PMKeymaker
 import UserNotifications
+import PMCommon
 
 public class PushNotificationService: NSObject, Service {
 
@@ -48,12 +49,14 @@ public class PushNotificationService: NSObject, Service {
     private let unlockProvider: UnlockProvider
     private let deviceTokenSaver: Saver<String>
     
+    private let unlockQueue = DispatchQueue(label: "PushNotificationService.unlock")
+    
     init(service: MessageDataService? = nil,
          subscriptionSaver: Saver<Set<SubscriptionWithSettings>> = KeychainSaver(key: Key.subscription),
          encryptionKitSaver: Saver<Set<PushSubscriptionSettings>> = PushNotificationDecryptor.saver,
          outdatedSaver: Saver<Set<SubscriptionSettings>> = PushNotificationDecryptor.outdater,
          sessionIDProvider: SessionIdProvider = AuthCredentialSessionIDProvider(),
-         deviceRegistrator: DeviceRegistrator = APIService.unauthorized, // unregister call is unauthorized; register call is authorized one, we will inject auth credentials into the call itself
+         deviceRegistrator: DeviceRegistrator = PMAPIService.unauthorized, // unregister call is unauthorized; register call is authorized one, we will inject auth credentials into the call itself
          signInProvider: SignInProvider = SignInManagerProvider(),
          deviceTokenSaver: Saver<String> = PushNotificationDecryptor.deviceTokenSaver,
          unlockProvider: UnlockProvider = UnlockManagerProvider())
@@ -65,7 +68,7 @@ public class PushNotificationService: NSObject, Service {
         self.signInProvider = signInProvider
         self.deviceTokenSaver = deviceTokenSaver
         self.unlockProvider = unlockProvider
-        
+        self.latestDeviceToken = KeychainWrapper.keychain.string(forKey: PushNotificationDecryptor.Key.deviceToken)
         super.init()
         
         defer {
@@ -79,6 +82,14 @@ public class PushNotificationService: NSObject, Service {
     }
     
     fileprivate var latestDeviceToken: String? { // previous device tokens are not relevant for this class
+        willSet {
+            guard latestDeviceToken != newValue else { return }
+            // Reset state if new token is changed.
+            let settings = self.currentSubscriptions.settings()
+            for setting in settings {
+                self.currentSubscriptions.update(setting, toState: .notReported)
+            }
+        }
         didSet { self.deviceTokenSaver.set(newValue: latestDeviceToken)} // but we have to save one for PushNotificationDecryptor
     }
     fileprivate let currentSubscriptions: SubscriptionsPack
@@ -105,7 +116,7 @@ public class PushNotificationService: NSObject, Service {
     }
     
     @objc private func didUnlockAsync() {
-        DispatchQueue.global().async {
+        unlockQueue.async {
             self.didUnlock()    // cuz encryption kit generation can take significant time
         }
     }
@@ -198,6 +209,10 @@ public class PushNotificationService: NSObject, Service {
         if let options = self.launchOptions {
             self.didReceiveRemoteNotification(options, forceProcess: true, fetchCompletionHandler: { })
         }
+    }
+    
+    func hasCachedLaunchOptions() -> Bool {
+        return self.launchOptions != nil
     }
     
     // MARK: - notifications
@@ -328,5 +343,5 @@ protocol DeviceRegistrator {
     func deviceUnregister(_ settings: PushSubscriptionSettings, completion: @escaping CompletionBlock)
 }
 
-extension APIService: DeviceRegistrator {}
+extension PMAPIService: DeviceRegistrator {}
 

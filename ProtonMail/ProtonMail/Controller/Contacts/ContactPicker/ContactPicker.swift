@@ -44,7 +44,7 @@ protocol ContactPickerDelegate: ContactCollectionViewDelegate {
     func finishLockCheck()
 }
 
-class ContactPicker: UIView {
+class ContactPicker: UIView, AccessibleView {
     private var keyboardFrame: CGRect = .zero
     private var searchTableViewController: ContactSearchTableViewController?
     
@@ -58,9 +58,7 @@ class ContactPicker: UIView {
         controller.tableView.sectionHeaderHeight = 0
         controller.tableView.sectionFooterHeight = 0
         controller.tableView.reloadData()
-        if #available(iOS 11.0, *) {
-            controller.tableView.contentInsetAdjustmentBehavior = .never
-        }
+        controller.tableView.contentInsetAdjustmentBehavior = .never
         controller.onSelection = { [unowned self] model in
             self.hideSearchTableView()
             // if contact group is selected, we add all emails in it as selected, initially
@@ -150,7 +148,7 @@ class ContactPicker: UIView {
         
         self.contactCollectionView.topAnchor.constraint(equalTo: self.topAnchor).isActive = true
         self.contactCollectionView.bottomAnchor.constraint(equalTo: self.bottomAnchor).isActive = true
-        self.contactCollectionView.leadingAnchor.constraint(equalTo: self.leadingAnchor).isActive = true
+        self.contactCollectionView.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 4).isActive = true
         self.contactCollectionView.trailingAnchor.constraint(equalTo: self.trailingAnchor).isActive = true
         
         self.maxVisibleRows = ContactPickerDefined.kMaxVisibleRows
@@ -171,6 +169,7 @@ class ContactPicker: UIView {
                                                selector: #selector(keyboardShown(_:)),
                                                name: UIResponder.keyboardWillHideNotification,
                                                object: nil)
+        generateAccessibilityIdentifiers()
     }
     
     override func awakeFromNib() {
@@ -421,6 +420,17 @@ extension ContactPicker : ContactCollectionViewDelegate {
                 self.delegate?.finishLockCheck()
             }
         }        
+    }
+    
+    func checkMails(in contactGroup: ContactGroupVO, progress: () -> Void, complete: LockCheckComplete?) {
+        self.delegate?.checkMails(in: contactGroup, progress: progress, complete: { (image, type) in
+            complete?(image, type)
+            self.contactCollectionView.performBatchUpdates({
+                self.layoutIfNeeded()
+            }) { (finished) in
+                self.delegate?.finishLockCheck()
+            }
+        })
     }
     
     internal func collectionView(at: UICollectionView?, willChangeContentSizeTo newSize: CGSize) {

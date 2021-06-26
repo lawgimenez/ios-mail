@@ -107,13 +107,7 @@ class MenuCoordinatorNew: DefaultCoordinator {
     private func toPlan() {
         let user = self.viewModel.currentUser!
         let nextCoordinator = StorefrontCoordinator(rvc: self.viewController?.revealViewController(), user: user)
-        if let currentSubscription = user.sevicePlanService.currentSubscription {
-            let storefront = Storefront(subscription: currentSubscription, servicePlanService: user.sevicePlanService, user: user.userInfo)
-            nextCoordinator.viewController?.viewModel = StorefrontViewModel(storefront: storefront, servicePlanService: user.sevicePlanService)
-        } else {
-            let storefront = Storefront(plan: .free, servicePlanService: user.sevicePlanService, user: user.userInfo)
-            nextCoordinator.viewController?.viewModel = StorefrontViewModel(storefront: storefront, servicePlanService: user.sevicePlanService)
-        }
+        nextCoordinator.viewController?.viewModel = StorefrontViewModel(currentUser: user)
 
         nextCoordinator.start()
     }
@@ -128,17 +122,20 @@ class MenuCoordinatorNew: DefaultCoordinator {
         if let mailbox = Message.Location(rawValue: labelID) {
             nextVM = MailboxViewModelImpl(label: mailbox, userManager: user,
                                           usersManager: self.viewModel.users,
-                                          pushService: services.get())
+                                          pushService: services.get(),
+                                          coreDataService: services.get())
         } else if let label = labelService.label(by: labelID) {
             //shared global service need to be changed later
             if label.exclusive {
                 nextVM = FolderboxViewModelImpl(label: label, userManager: user,
                                                 usersManager: self.viewModel.users,
-                                                pushService: services.get())
+                                                pushService: services.get(),
+                                                coreDataService: services.get())
             } else {
                 nextVM = LabelboxViewModelImpl(label: label, userManager: user,
                                                usersManager: self.viewModel.users,
-                                               pushService: services.get())
+                                               pushService: services.get(),
+                                               coreDataService: services.get())
             }
         }
         
@@ -157,6 +154,14 @@ class MenuCoordinatorNew: DefaultCoordinator {
     }
     
     func follow(_ deepLink: DeepLink) {
+        
+        // Navigate to notification mail firstly, ignore previous deep link
+        let pushService = sharedServices.get(by: PushNotificationService.self)
+        guard !pushService.hasCachedLaunchOptions() else {
+            pushService.processCachedLaunchOptions()
+            return
+        }
+        
         // take first node
         var start = deepLink.popFirst
         
@@ -166,21 +171,25 @@ class MenuCoordinatorNew: DefaultCoordinator {
             case .switchUser where setup.value != nil:
                 // this will setup currentUser to this MenuViewModel which will transfer it down the hierarchy
                 let users = services.get(by: UsersManager.self)
-                let user = users.getUser(bySessionID: setup.value!)
+                guard let user = users.getUser(bySessionID: setup.value!) else {
+                    break
+                }
                 users.active(uid: setup.value!)
                 self.viewModel.currentUser = user
                 
             case .switchUserFromNotification where setup.value != nil:
                 let users = services.get(by: UsersManager.self)
-                let user = users.getUser(bySessionID: setup.value!)
+                guard let user = users.getUser(bySessionID: setup.value!) else {
+                    break
+                }
                 
                 users.active(uid: setup.value!)
-                let isSameUser = self.viewModel.currentUser?.userinfo.userId ?? "" == user?.userinfo.userId ?? ""
+                let isSameUser = self.viewModel.currentUser?.userinfo.userId ?? "" == user.userinfo.userId 
                 self.viewModel.currentUser = user
                 
-                if user != nil && !isSameUser {
+                if !isSameUser {
                     String(format: LocalString._switch_account_by_click_notification,
-                           user!.defaultEmail).alertToastBottom()
+                           user.defaultEmail).alertToastBottom()
                 }
             default: break
             }
@@ -223,6 +232,12 @@ class MenuCoordinatorNew: DefaultCoordinator {
             return false
         }
         
+        //Inactive nsfetchcontroller while last view entering background
+        let lastFrontVC = (rvc.frontViewController as? UINavigationController)?.firstViewController()
+        if let vc = lastFrontVC as? MailboxViewController {
+            vc.inactiveViewModel()
+        }
+        
         switch dest {
         case .mailbox:
             guard let next = navigation?.firstViewController() as? MailboxViewController else {
@@ -236,7 +251,7 @@ class MenuCoordinatorNew: DefaultCoordinator {
             guard let user = self.viewModel.currentUser else {
                 return false
             }
-            let viewModel = MailboxViewModelImpl(label: label, userManager: user, usersManager: self.viewModel.users, pushService: services.get())
+            let viewModel = MailboxViewModelImpl(label: label, userManager: user, usersManager: self.viewModel.users, pushService: services.get(), coreDataService: services.get())
             let mailbox = MailboxCoordinator(rvc: rvc, nav: navigation, vc: next, vm: viewModel, services: self.services)
             self.lastestCoordinator = mailbox
             mailbox.start()
@@ -254,17 +269,20 @@ class MenuCoordinatorNew: DefaultCoordinator {
             var viewModel : MailboxViewModel = MailboxViewModelImpl(label: Message.Location.inbox,
                                                                     userManager: user,
                                                                     usersManager: self.viewModel.users,
-                                                                    pushService: services.get())
+                                                                    pushService: services.get(),
+                                                                    coreDataService: services.get())
             
             if let label = sender as? Label {
                 if label.exclusive {
                     viewModel = FolderboxViewModelImpl(label: label, userManager: user,
                                                        usersManager: self.viewModel.users,
-                                                       pushService: services.get())
+                                                       pushService: services.get(),
+                                                       coreDataService: services.get())
                 } else {
                     viewModel = LabelboxViewModelImpl(label: label, userManager: user,
                                                       usersManager: self.viewModel.users,
-                                                      pushService: services.get())
+                                                      pushService: services.get(),
+                                                      coreDataService: services.get())
                 }
             }
             let mailbox = MailboxCoordinator(rvc: rvc, nav: navigation, vc: next, vm: viewModel, services: self.services)

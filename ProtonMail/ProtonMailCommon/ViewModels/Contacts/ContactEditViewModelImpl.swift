@@ -51,15 +51,15 @@ class ContactEditViewModelImpl : ContactEditViewModel {
     var origvCard2 : PMNIVCard?
     var origvCard3 : PMNIVCard?
     
-    init(c : Contact?, user: UserManager) {
-        super.init(user: user)
+    init(c: Contact?, user: UserManager, coreDataService: CoreDataService) {
+        super.init(user: user, coreDataService: coreDataService)
         self.contact = c
         self.prepareContactData()
         self.prepareContactGroupData()
     }
     
     private func prepareContactGroupData() {
-        let groups = self.user.labelService.getAllLabels(of: .contactGroup)
+        let groups = self.user.labelService.getAllLabels(of: .contactGroup, context: self.coreDataService.mainManagedObjectContext)
 
         for group in groups {
             contactGroupData[group.labelID] = (name: group.name, color: group.color, count: group.emails.count)
@@ -101,7 +101,8 @@ class ContactEditViewModelImpl : ContactEditViewModel {
                                                       sign: sign,
                                                       scheme: schemeType,
                                                       mimeType: mimeType,
-                                                      delegate: self)
+                                                      delegate: self,
+                                                      coreDataService: self.coreDataService)
                             self.emails.append(ce)
                             order += 1
                         }
@@ -137,7 +138,8 @@ class ContactEditViewModelImpl : ContactEditViewModel {
                                                       sign: sign,
                                                       scheme: schemeType,
                                                       mimeType: mimeType,
-                                                      delegate: self)
+                                                      delegate: self,
+                                                      coreDataService: self.coreDataService)
                             self.emails.append(ce)
                             order += 1
                         }
@@ -212,10 +214,13 @@ class ContactEditViewModelImpl : ContactEditViewModel {
                                 self.informations.append(info)
                             case "Birthday":
                                 let births = vcard.getBirthdays()
-                                for b in births {
-                                    let info = ContactEditInformation(type: .birthday, value:b.getText(), isNew: false)
-                                    self.informations.append(info)
-                                    break //only change first
+                                if let birthday = births.first {
+                                    let info = ContactEditInformation(
+                                        type: .birthday,
+                                        value: birthday.formattedBirthday,
+                                        isNew: false
+                                    )
+                                    informations.append(info)
                                 }
                             case "Anniversary":
                                 break
@@ -242,7 +247,7 @@ class ContactEditViewModelImpl : ContactEditViewModel {
                                       photo?.getImageType() ?? "",
                                       photo?.getIsBinary() ?? "")
                                 if let image = photo?.getRawData() {
-                                    let data = Data.init(bytes: image)
+                                    let data = Data.init(image)
                                     self.profilePicture = UIImage.init(data: data)
                                     self.origProfilePicture = self.profilePicture
                                 }
@@ -438,7 +443,8 @@ class ContactEditViewModelImpl : ContactEditViewModel {
                                      sign: nil ,
                                      scheme: nil,
                                      mimeType: nil,
-                                     delegate: self)
+                                     delegate: self,
+                                     coreDataService: self.coreDataService)
         emails.append(email)
         return email
     }

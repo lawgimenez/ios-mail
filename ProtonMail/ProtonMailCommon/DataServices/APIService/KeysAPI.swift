@@ -24,37 +24,47 @@
 import Foundation
 import PromiseKit
 import Crypto
+import PMCommon
 
-final class UserEmailPubKeys : ApiRequestNew<KeysResponse> {
+
+//Keys API
+struct KeysAPI {
+    static let path : String = "/keys"
+}
+
+
+///KeysResponse
+final class UserEmailPubKeys : Request {
     let email : String
-    init(email: String,
-         api: API,
-         authCredential: AuthCredential? = nil)
-    {
+    
+    init(email: String, authCredential: AuthCredential? = nil) {
         self.email = email
-        super.init(api: api)
-        self.authCredential = authCredential
+        self.auth = authCredential
     }
     
-    override func toDictionary() -> [String : Any]? {
+    var parameters: [String : Any]? {
         let out : [String : Any] = ["Email" : self.email]
         return out
     }
     
-    override func path() -> String {
-        return KeysAPI.path + Constants.App.DEBUG_OPTION
+    var path: String {
+        return KeysAPI.path
     }
     
-    override func apiVersion() -> Int {
-        return KeysAPI.v_get_emails_pub_key
+    //custom auth credentical
+    let auth: AuthCredential?
+    var authCredential : AuthCredential? {
+        get {
+            return self.auth
+        }
     }
 }
 
 extension Array where Element : UserEmailPubKeys {
-    var promises : [Promise<KeysResponse>] {
+    func getPromises(api: APIService) -> [Promise<KeysResponse>] {
         var out : [Promise<KeysResponse>] = [Promise<KeysResponse>]()
         for it in self {
-             out.append(it.run())
+            out.append(api.run(route: it))
         }
         return out
     }
@@ -72,7 +82,8 @@ final class KeyResponse {
     }
 }
 
-final class KeysResponse : ApiResponse {
+
+final class KeysResponse : Response {
     var recipientType : Int = 1 // 1 internal 2 external
     var mimeType : String?
     var keys : [KeyResponse] = [KeyResponse]()
@@ -141,22 +152,25 @@ final class KeysResponse : ApiResponse {
     }
 }
 
-final class GetKeysSalts : ApiRequestNew<KeySaltResponse> {
-    
-    override func method() -> HTTPMethod {
-        return .get
+///KeySaltResponse
+final class GetKeysSalts : Request {
+    init(authCredential: AuthCredential? = nil) {
+        self.auth = authCredential
+    }
+    var path: String {
+        return KeysAPI.path + "/salts"
     }
     
-    override func path() -> String {
-        return KeysAPI.path + "/salts" + Constants.App.DEBUG_OPTION
-    }
-    
-    override func apiVersion() -> Int {
-        return KeysAPI.v_get_key_salts
+    //custom auth credentical
+    var auth: AuthCredential?
+    var authCredential : AuthCredential? {
+        get {
+            return self.auth
+        }
     }
 }
 
-final class KeySaltResponse : ApiResponse {
+final class KeySaltResponse : Response {
     var keySalt : String?
     var keyID : String?
     override func ParseResponse(_ response: [String : Any]!) -> Bool {
@@ -182,8 +196,7 @@ final class PasswordAuth : Package {
         self.verifer = verifer
     }
     
-    // Mark : override class functions
-    func toDictionary() -> [String:Any]? {
+    var parameters: [String : Any]? {
         let out : [String : Any] = [
             "Version" : self.AuthVersion,
             "ModulusID" : self.ModulusID,
@@ -195,8 +208,8 @@ final class PasswordAuth : Package {
 }
 
 
-//MARK : update user's private keys
-final class UpdatePrivateKeyRequest : ApiRequest<ApiResponse> {
+//MARK : update user's private keys -- Response
+final class UpdatePrivateKeyRequest : Request {
     
     let clientEphemeral : String //base64 encoded
     let clientProof : String //base64 encoded
@@ -208,17 +221,47 @@ final class UpdatePrivateKeyRequest : ApiRequest<ApiResponse> {
     var userAddressKeys: [Key]
     let orgKey : String?
     
+    let userKeys: [Key]?
+    
     let auth : PasswordAuth?
-
     
     init(clientEphemeral: String,
          clientProof: String,
          SRPSession: String,
          keySalt: String,
-         userlevelKeys: [Key],
-         addressKeys: [Key],
-         tfaCode : String?,
-         orgKey: String?,
+         tfaCode : String? = nil,
+         orgKey: String? = nil,
+         userKeys: [Key]? = nil,
+         auth: PasswordAuth?,
+         authCredential: AuthCredential?
+         ) {
+        self.clientEphemeral = clientEphemeral
+        self.clientProof = clientProof
+        self.SRPSession = SRPSession
+        self.keySalt = keySalt
+        self.userLevelKeys = []
+        self.userAddressKeys = []
+        
+        self.userKeys = userKeys
+        
+        //optional values
+        self.orgKey = orgKey
+        self.tfaCode = tfaCode
+        self.auth = auth
+        
+        self.credential = authCredential
+    }
+
+    init(clientEphemeral: String,
+         clientProof: String,
+         SRPSession: String,
+         keySalt: String,
+         userlevelKeys: [Key] = [],
+         addressKeys: [Key] = [],
+         tfaCode : String? = nil,
+         orgKey: String? = nil,
+
+         userKeys: [Key]?,
          
          auth: PasswordAuth?,
          authCredential: AuthCredential?
@@ -230,17 +273,25 @@ final class UpdatePrivateKeyRequest : ApiRequest<ApiResponse> {
         self.userLevelKeys = userlevelKeys
         self.userAddressKeys = addressKeys
         
+        self.userKeys = userKeys
+        
         //optional values
         self.orgKey = orgKey
         self.tfaCode = tfaCode
         self.auth = auth
         
-        super.init()
-        
-        self.authCredential = authCredential
+        self.credential = authCredential
     }
     
-    override func toDictionary() -> [String : Any]? {
+    //custom auth credentical
+    let credential: AuthCredential?
+    var authCredential : AuthCredential? {
+        get {
+            return self.credential
+        }
+    }
+    
+    var parameters: [String : Any]? {
         var keysDict : [Any] = [Any]()
         for _key in userLevelKeys {
             if _key.is_updated {
@@ -258,8 +309,21 @@ final class UpdatePrivateKeyRequest : ApiRequest<ApiResponse> {
             "ClientProof" : self.clientProof,
             "SRPSession": self.SRPSession,
             "KeySalt" : self.keySalt,
-            "Keys" : keysDict
             ]
+        
+        if !keysDict.isEmpty {
+            out["Keys"] = keysDict
+        }
+        
+        if let userKeys = self.userKeys {
+            var userKeysDict : [Any] = [Any]()
+            for key in userKeys {
+                userKeysDict.append( ["ID": key.key_id, "PrivateKey" : key.private_key] )
+            }
+            if !userKeysDict.isEmpty {
+                out["UserKeys"] = userKeysDict
+            }
+        }
         
         if let code = tfaCode {
             out["TwoFactorCode"] = code
@@ -268,102 +332,66 @@ final class UpdatePrivateKeyRequest : ApiRequest<ApiResponse> {
              out["OrganizationKey"] = org_key
         }
         if let auth_obj = self.auth {
-            out["Auth"] = auth_obj.toDictionary()
+            out["Auth"] = auth_obj.parameters
         }
+        
         return out
     }
     
-    override func method() -> HTTPMethod {
+    var method: HTTPMethod {
         return .put
     }
     
-    override func path() -> String {
-        return KeysAPI.path + "/private" + Constants.App.DEBUG_OPTION
-    }
-    
-    override func apiVersion() -> Int {
-        return KeysAPI.v_update_private_key
+    var path: String {
+        return KeysAPI.path + "/private"
     }
 }
 
-
-//MARK : update user's private keys
-final class SetupKeyRequest : ApiRequest<ApiResponse> {
-    
-    let addressID : String
-    let privateKey : String
-    let signedKeyList: [String: Any]
-    let keySalt : String //base64 encoded need random value
-    
-    let auth : PasswordAuth
-    
-    
-    init(address_id: String,
-         private_key : String,
-         keysalt : String,
-         signedKL : [String: Any],
-         auth : PasswordAuth,
-         authCredential: AuthCredential?) {
-        self.keySalt = keysalt
-        self.addressID = address_id
-        self.privateKey = private_key
-        self.signedKeyList = signedKL
-        self.auth = auth
-        super.init()
-        
-        self.authCredential = authCredential
+extension Array where Element: Package {
+    var parameters: [Any]? {
+        var out : [Any] = []
+        for item in self {
+            out.append(item.parameters)
+        }
+        return  out
     }
-    
-    override func toDictionary() -> [String : Any]? {
-        let address : [String: Any] = [
-            "AddressID" : self.addressID,
-            "PrivateKey" : self.privateKey,
-            "SignedKeyList" : self.signedKeyList
-        ]
-        
-        let out : [String : Any] = [
-            "KeySalt" : self.keySalt,
-            "PrimaryKey": self.privateKey,
-            "AddressKeys" : [address] ,
-            "Auth" : self.auth.toDictionary()!
-        ]
-
-        PMLog.D(out.json(prettyPrinted: true))
-        
-        return out
-    }
-    
-    override func method() -> HTTPMethod {
-        return .post
-    }
-    
-    override func path() -> String {
-        return KeysAPI.path + "/setup" + Constants.App.DEBUG_OPTION
-    }
-    
-    override func apiVersion() -> Int {
-        return KeysAPI.v_setup_key
+    var json : String {
+        return self.parameters!.toJson()
     }
 }
 
-
-
-
-//MARK : active a key when Activation is not null
-final class ActivateKey : ApiRequestNew<ApiResponse> {
+extension Array where Element: Any {
+    func toJson(prettyPrinted : Bool = false) -> String {
+        let options : JSONSerialization.WritingOptions = prettyPrinted ? .prettyPrinted : JSONSerialization.WritingOptions()
+        let anyObject: Any = self
+        if JSONSerialization.isValidJSONObject(anyObject) {
+            do {
+                let data = try JSONSerialization.data(withJSONObject: anyObject, options: options)
+                if let string = NSString(data: data, encoding: String.Encoding.utf8.rawValue) {
+                    return string as String
+                }
+            } catch let ex as NSError {
+                PMLog.D("\(ex)")
+            }
+        }
+        return ""
+    }
     
+}
+
+//MARK : active a key when Activation is not null --- Response
+final class ActivateKey : Request {
     let addressID : String
     let privateKey : String
     let signedKeyList: [String: Any]
     
-    init(api: API, addrID: String, privKey : String, signedKL : [String: Any]) {
+    init(addrID: String, privKey : String, signedKL : [String: Any]) {
         self.addressID = addrID
         self.privateKey = privKey
         self.signedKeyList = signedKL
-        super.init(api: api)
     }
     
-    override func toDictionary() -> [String : Any]? {
+    var parameters: [String : Any]? {
         let out : [String: Any] = [
             "PrivateKey" : self.privateKey,
             "SignedKeyList" : self.signedKeyList
@@ -372,16 +400,20 @@ final class ActivateKey : ApiRequestNew<ApiResponse> {
         return out
     }
     
-    override func method() -> HTTPMethod {
+    var method: HTTPMethod {
         return .put
     }
     
-    override func path() -> String {
-        return KeysAPI.path + "/address/" + addressID + Constants.App.DEBUG_OPTION
+    var path: String {
+        return KeysAPI.path + "/" + addressID + "/activate"
     }
     
-    override func apiVersion() -> Int {
-        return KeysAPI.v_activate_key
+    //custom auth credentical
+    var auth: AuthCredential?
+    var authCredential : AuthCredential? {
+        get {
+            return self.auth
+        }
     }
 }
 

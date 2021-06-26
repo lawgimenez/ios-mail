@@ -32,7 +32,7 @@ fileprivate final class InputAccessoryHackHelper: NSObject {
 protocol HtmlEditorBehaviourDelegate : AnyObject {
     func htmlEditorDidFinishLoadingContent()
     func caretMovedTo(_ offset: CGPoint)
-    func addInlineAttachment(_ sid: String, data: Data)
+    func addInlineAttachment(_ sid: String, data: Data) -> Promise<Void>
     func removeInlineAttachment(_ sid: String)
 }
 
@@ -252,7 +252,7 @@ class HtmlEditorBehaviour: NSObject {
     ///
     /// - Parameter html: the raw html signatue, don't run escape before here.
     func update(signature html : String) {
-        self.run(with: "html_editor.updateSignature('\(html.escaped)', \(HTMLStringSecureLoader.domPurifyConfiguration));").catch { (error) in
+        self.run(with: "html_editor.updateSignature('\(html.escaped)', \(HTTPRequestSecureLoader.domPurifyConfiguration));").catch { (error) in
             PMLog.D("Error is \(error.localizedDescription)")
         }
     }
@@ -263,7 +263,10 @@ class HtmlEditorBehaviour: NSObject {
     ///   - cid: embed image content id
     ///   - blob: based64 encoded. don't need run escape
     func update(embedImage cid : String, encoded blob : String) {
-        let escapedBlob: String = blob.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        
+        //Use batch process to add the percent encoding to solve the memory issue
+        let escapedBlob: String = blob.batchAddingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        
         self.run(with: "html_editor.updateEncodedEmbedImage(\"\(cid)\", \"\(escapedBlob)\");").catch { (error) in
             PMLog.D("Error is \(error.localizedDescription)")
         }
@@ -346,7 +349,7 @@ extension HtmlEditorBehaviour: WKScriptMessageHandler {
                 assert(false, "Broken message: lack important data")
                 return
             }
-            self.delegate?.addInlineAttachment(path, data: base64Data)
+            self.delegate?.addInlineAttachment(path, data: base64Data).cauterize()
             
         case .heightUpdated:
             guard let newHeight = userInfo["height"] as? Double else {
